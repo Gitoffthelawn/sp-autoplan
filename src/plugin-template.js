@@ -4,44 +4,15 @@
 // ============================================================================
 
 /**
- * Format a Date as "YYYY-MM-DD" string for Super Productivity's dueDay field
- */
-function formatDateAsDay(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * Check if a date is today
- */
-function isToday(date) {
-  const today = new Date();
-  return date.getFullYear() === today.getFullYear() &&
-         date.getMonth() === today.getMonth() &&
-         date.getDate() === today.getDate();
-}
-
-/**
  * Get scheduling fields for a task based on its scheduled time.
- * - For today: use dueWithTime (shows in Today view with specific time)
- * - For future days: use dueDay (shows in Planner view without cluttering Today)
+ * Uses dueWithTime (timestamp in milliseconds) for all tasks.
+ * This ensures tasks scheduled for the future appear in Planner, not Today.
  */
 function getSchedulingFields(startTime) {
-  if (isToday(startTime)) {
-    // For today, use dueWithTime so it appears in Today with scheduled time
-    return {
-      dueWithTime: startTime.getTime(),
-      dueDay: null, // Clear dueDay when setting dueWithTime
-    };
-  } else {
-    // For future days, use dueDay so it appears in Planner, not Today
-    return {
-      dueDay: formatDateAsDay(startTime),
-      dueWithTime: null, // Clear dueWithTime when setting dueDay
-    };
-  }
+  return {
+    dueWithTime: startTime.getTime(),
+    dueDay: null, // Clear dueDay to avoid conflicts
+  };
 }
 
 /**
