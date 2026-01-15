@@ -892,34 +892,43 @@ TaskMerger.findRelatedSplitsAsync = async function(taskId) {
 /**
  * Merge split tasks back into a single task
  * This extends TaskMerger with PluginAPI integration
+ * 
+ * @param {string} taskId - ID of any task in the split group
+ * @param {boolean} silent - If true, don't show snack notifications
  */
-TaskMerger.mergeSplits = async function(taskId) {
+TaskMerger.mergeSplits = async function(taskId, silent = false) {
   const tasks = await PluginAPI.getTasks();
   const { splits, originalTaskId, originalTitle } = this.findRelatedSplits(tasks, taskId);
   
   if (splits.length === 0) {
-    PluginAPI.showSnack({
-      msg: 'This task is not a split task',
-      type: 'WARNING',
-    });
+    if (!silent) {
+      PluginAPI.showSnack({
+        msg: 'This task is not a split task',
+        type: 'WARNING',
+      });
+    }
     return null;
   }
 
   if (splits.length === 1) {
-    PluginAPI.showSnack({
-      msg: 'Only one split remaining, nothing to merge',
-      type: 'INFO',
-    });
+    if (!silent) {
+      PluginAPI.showSnack({
+        msg: 'Only one split remaining, nothing to merge',
+        type: 'INFO',
+      });
+    }
     return null;
   }
 
   // Calculate total remaining time from incomplete splits
   const incompleteSplits = splits.filter(s => !s.isDone);
   if (incompleteSplits.length === 0) {
-    PluginAPI.showSnack({
-      msg: 'All splits are already completed',
-      type: 'INFO',
-    });
+    if (!silent) {
+      PluginAPI.showSnack({
+        msg: 'All splits are already completed',
+        type: 'INFO',
+      });
+    }
     return null;
   }
 
@@ -966,10 +975,12 @@ TaskMerger.mergeSplits = async function(taskId) {
     }
   }
 
-  PluginAPI.showSnack({
-    msg: `Merged ${mergeData.mergedCount} splits into "${mergeData.title}"`,
-    type: 'SUCCESS',
-  });
+  if (!silent) {
+    PluginAPI.showSnack({
+      msg: `Merged ${mergeData.mergedCount} splits into "${mergeData.title}"`,
+      type: 'SUCCESS',
+    });
+  }
 
   return {
     mergedTaskId: mergedTask.id,
@@ -1023,10 +1034,18 @@ async function runAutoplan(dryRun = false) {
   console.log('[AutoPlan] Starting autoplanning...');
 
   try {
+    // Step 1: Clear previous planning (merge splits + clear scheduled times)
+    // Skip this step for dry run since we don't want to modify tasks
+    if (!dryRun) {
+      console.log('[AutoPlan] Clearing previous planning...');
+      const clearResult = await clearPlanning(true); // silent mode - don't show snack
+      console.log(`[AutoPlan] Merged ${clearResult.merged} split groups, cleared ${clearResult.cleared} tasks`);
+    }
+
     // Load config
     const config = await loadConfig();
 
-    // Get all tasks, tags, and projects
+    // Get all tasks, tags, and projects (re-fetch after clearing)
     const allTasks = await PluginAPI.getTasks();
     const allTags = await PluginAPI.getAllTags();
     const allProjects = await PluginAPI.getAllProjects();
@@ -1125,8 +1144,10 @@ async function previewSchedule() {
  * - Are not completed
  * 
  * Also merges all split tasks back into their original tasks first.
+ * 
+ * @param {boolean} silent - If true, don't show snack notifications (used when called internally)
  */
-async function clearPlanning() {
+async function clearPlanning(silent = false) {
   console.log('[AutoPlan] Clearing planning from tasks...');
 
   try {
@@ -1141,7 +1162,8 @@ async function clearPlanning() {
       // Get the first task ID from the group to trigger merge
       const firstTaskId = group.splits[0];
       try {
-        const result = await TaskMerger.mergeSplits(firstTaskId);
+        // Pass silent=true to suppress individual merge notifications
+        const result = await TaskMerger.mergeSplits(firstTaskId, true);
         if (result) {
           mergedCount++;
           console.log(`[AutoPlan] Merged group: ${group.originalTitle}`);
@@ -1208,10 +1230,12 @@ async function clearPlanning() {
       message = 'No tasks to clear planning from';
     }
 
-    PluginAPI.showSnack({
-      msg: message,
-      type: mergedCount > 0 || clearedCount > 0 ? 'SUCCESS' : 'INFO',
-    });
+    if (!silent) {
+      PluginAPI.showSnack({
+        msg: message,
+        type: mergedCount > 0 || clearedCount > 0 ? 'SUCCESS' : 'INFO',
+      });
+    }
 
     return { merged: mergedCount, cleared: clearedCount };
 

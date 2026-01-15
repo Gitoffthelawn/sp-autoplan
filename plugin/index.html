@@ -697,8 +697,14 @@
     <div class="section">
       <div class="section-title">Schedule Preview</div>
       <p class="section-description">
-        See how your tasks will be scheduled before applying changes. This is a dry run - no tasks are modified.
+        See how your tasks will be scheduled before applying changes.
       </p>
+      
+      <div class="tip-box" style="margin-bottom: 16px;">
+        <strong>Preview limitations:</strong>
+        <p>The preview shows the schedule based on the <em>current</em> state of your tasks. It does not simulate merging split tasks first.</p>
+        <p>If you have existing split tasks, the actual run may produce different results since it merges them before scheduling.</p>
+      </div>
       
       <button class="btn" onclick="previewSchedule()">
         Generate Preview
@@ -717,10 +723,11 @@
       
       <div class="tip-box" style="margin-bottom: 16px;">
         <strong>What happens when you run AutoPlan:</strong>
-        <p>1. Tasks with time estimates are split into blocks (based on Block Size setting)</p>
-        <p>2. Each block is scheduled to your calendar based on priority</p>
-        <p>3. Original tasks are replaced with split tasks (e.g., "Task I", "Task II")</p>
-        <p>You can undo splits using the Merge tab.</p>
+        <p>1. All existing split tasks are merged back together</p>
+        <p>2. Scheduled times are cleared from eligible tasks</p>
+        <p>3. Tasks are split into blocks (based on Block Size setting)</p>
+        <p>4. Each block is scheduled to your calendar based on priority</p>
+        <p>This means you can safely re-run AutoPlan at any time to reschedule.</p>
       </div>
       
       <button class="btn btn-primary" onclick="runAutoplan()">
@@ -731,14 +738,14 @@
     <div class="section">
       <div class="section-title">Clear Planning</div>
       <p class="section-description">
-        Merge all split tasks back together and remove scheduled times, allowing you to start fresh.
+        Merge all split tasks back together and remove scheduled times, without rescheduling.
       </p>
       
       <div class="tip-box" style="margin-bottom: 16px;">
         <strong>What happens:</strong>
         <p>1. All split tasks (e.g., "Task &lt;I&gt;", "Task &lt;II&gt;") are merged back into single tasks</p>
         <p>2. Scheduled times are removed from tasks with time estimates (except those with "Do Not Reschedule" tag)</p>
-        <p>This is useful when you want to re-run AutoPlan from scratch.</p>
+        <p>Use this if you want to clear the schedule without immediately rescheduling.</p>
       </div>
       
       <button class="btn" onclick="handleClearPlanning()">
