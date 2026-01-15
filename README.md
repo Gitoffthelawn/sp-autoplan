@@ -4,11 +4,10 @@ Intelligently schedule your tasks based on urgency. Inspired by the proven appro
 
 ## Installation
 
-1. Download `sp-autoplan-plugin.zip` from the [latest release](https://github.com/YOUR_USERNAME/sp-autoplan/releases/latest)
-2. Extract the zip file to a folder
-3. In Super Productivity: **Settings > Plugins > Load Plugin from Folder**
-4. Select the extracted folder
-5. Click the AutoPlan button (⚡) in the side panel
+1. Download `sp-autoplan-plugin.zip` from the [latest release](https://github.com/00sapo/sp-autoplan/releases/latest)
+2. In Super Productivity: **Settings > Plugin > Load Plugin**
+3. Enable the AutoPlan plugin
+4. Click on the AutoPlan button (🪄) in the top bar
 
 ## Quick Start
 
@@ -20,7 +19,7 @@ That's it. Everything works with sensible defaults. Reorder tasks to change base
 
 ## Features
 
-- ⚡ **Automatic scheduling** based on task order, tags, projects, duration, and age
+- ⚡ **Automatic scheduling** based on tags, projects, duration, and age
 - 🔄 **Smart task splitting** into manageable time blocks (default 2 hours)
 - 📅 **Calendar-aware** with configurable work hours and days off
 - 🛡️ **Safe re-running** — automatically merges splits and clears previous schedules
@@ -76,6 +75,4 @@ npm test             # Run tests
 
 ## License
 
-ISC
-
-Based on the proven scheduling algorithm of [taskcheck](https://github.com/00sapo/taskcheck) for taskwarrior.
+GPL-3.0
