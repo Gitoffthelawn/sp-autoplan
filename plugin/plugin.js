@@ -121,31 +121,6 @@ function escapeRegex(str) {
 
 const PriorityCalculator = {
   /**
-   * Calculate base priority from parent task order (N+1-r where N is total parent tasks, r is rank)
-   * Subtasks inherit their parent's base priority.
-   * 
-   * @param {Object} task - The task to calculate priority for
-   * @param {Array} parentTasks - Array of parent tasks (top-level tasks or tasks with subtasks) in order
-   * @param {Map} parentIdMap - Map of task ID to parent task (for looking up a subtask's parent)
-   */
-  calculateBasePriority(task, parentTasks, parentIdMap = null) {
-    // If this is a subtask and we have a parent map, find the parent's priority
-    if (task.parentId && parentIdMap) {
-      const parent = parentIdMap.get(task.parentId);
-      if (parent) {
-        // Recursively get parent's priority (handles nested subtasks)
-        return this.calculateBasePriority(parent, parentTasks, parentIdMap);
-      }
-    }
-    
-    // For parent tasks (or if no parent found), calculate from position in parentTasks
-    const totalTasks = parentTasks.length;
-    const rank = parentTasks.findIndex(t => t.id === task.id) + 1;
-    if (rank === 0) return 0; // Task not found in parent list
-    return totalTasks + 1 - rank;
-  },
-
-  /**
    * Calculate tag-based priority boost
    */
   calculateTagPriority(task, tagPriorities, allTags) {
@@ -234,28 +209,24 @@ const PriorityCalculator = {
    * Calculate total urgency/priority for a task
    * 
    * @param {Object} task - The task to calculate urgency for
-   * @param {Array} parentTasks - Array of parent tasks in order (for base priority)
    * @param {Object} config - Configuration object
    * @param {Array} allTags - All available tags
    * @param {Array} allProjects - All available projects
    * @param {Date} now - Current time for calculations
-   * @param {Map} parentIdMap - Optional map of task ID to parent task
    */
-  calculateUrgency(task, parentTasks, config, allTags, allProjects = [], now = new Date(), parentIdMap = null) {
-    const basePriority = this.calculateBasePriority(task, parentTasks, parentIdMap);
+  calculateUrgency(task, config, allTags, allProjects = [], now = new Date()) {
     const tagPriority = this.calculateTagPriority(task, config.tagPriorities || {}, allTags);
     const projectPriority = this.calculateProjectPriority(task, config.projectPriorities || {}, allProjects);
     const durationPriority = this.calculateDurationPriority(
-      task, config.durationFormula || 'linear', config.durationWeight ?? 1.0
+      task, config.durationFormula || 'none', config.durationWeight ?? 1.0
     );
     const oldnessPriority = this.calculateOldnessPriority(
-      task, config.oldnessFormula || 'linear', config.oldnessWeight ?? 1.0, now
+      task, config.oldnessFormula || 'none', config.oldnessWeight ?? 1.0, now
     );
 
     return {
-      total: basePriority + tagPriority + projectPriority + durationPriority + oldnessPriority,
+      total: tagPriority + projectPriority + durationPriority + oldnessPriority,
       components: {
-        base: basePriority,
         tag: tagPriority,
         project: projectPriority,
         duration: durationPriority,
@@ -466,9 +437,8 @@ const AutoPlanner = {
    * @param {Array} allProjects - All available projects
    * @param {Date} startTime - When to start scheduling from
    * @param {Array} fixedTasks - Tasks that should not be rescheduled (optional)
-   * @param {Array} allTasks - All tasks (for building parent hierarchy) (optional)
    */
-  schedule(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = [], allTasks = []) {
+  schedule(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = []) {
     if (splits.length === 0) return [];
 
     const schedule = [];
@@ -482,31 +452,6 @@ const AutoPlanner = {
     
     // Calculate fixed task minutes per day
     const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks);
-    
-    // Build parent task hierarchy
-    // Parent tasks are: tasks that have subtasks OR top-level tasks (no parentId)
-    const taskMap = new Map();
-    const parentIds = new Set();
-    for (const task of allTasks) {
-      taskMap.set(task.id, task);
-      if (task.parentId) {
-        parentIds.add(task.parentId);
-      }
-    }
-    
-    // Get parent tasks in order (tasks that are parents OR top-level non-done tasks)
-    // A "parent task" for priority purposes is either:
-    // 1. A task that has subtasks (is in parentIds)
-    // 2. A top-level task (no parentId) that doesn't have subtasks
-    const parentTasks = allTasks.filter(task => {
-      // Skip done tasks
-      if (task.isDone) return false;
-      // Include if it's a parent (has subtasks)
-      if (parentIds.has(task.id)) return true;
-      // Include if it's top-level (no parent)
-      if (!task.parentId) return true;
-      return false;
-    });
     
     // Helper to get available minutes for a specific day
     const getAvailableMinutesForDay = (date) => {
@@ -539,7 +484,6 @@ const AutoPlanner = {
 
     while (remainingSplits.length > 0 && daysScheduled < maxDaysAhead) {
       // Calculate urgency for all remaining splits
-      // Base priority comes from parent tasks order, subtasks inherit from parents
       const splitsWithUrgency = remainingSplits.map((split, index) => {
         // Calculate total remaining time for all unscheduled splits of the same original task
         const remainingSplitsForTask = remainingSplits.filter(
@@ -553,19 +497,17 @@ const AutoPlanner = {
         // Use the total remaining time for the original task, not just this split's time
         const pseudoTask = {
           ...split.originalTask,
-          id: split.originalTaskId, // Use original task ID for base priority lookup
+          id: split.originalTaskId,
           timeEstimate: totalRemainingMs,
           timeSpent: 0,
         };
 
         const urgency = PriorityCalculator.calculateUrgency(
           pseudoTask, 
-          parentTasks, // Use parent tasks for base priority calculation
           config,
           allTags,
           allProjects,
-          simulatedTime,
-          taskMap // Pass task map for parent lookup
+          simulatedTime
         );
 
         return {
@@ -1089,8 +1031,7 @@ async function runAutoplan(dryRun = false) {
     console.log(`[AutoPlan] Skipped ${skippedParents.length} parent tasks`);
 
     // Run scheduling algorithm
-    // Pass allTasks for building parent hierarchy for base priority calculation
-    const schedule = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks, allTasks);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
 

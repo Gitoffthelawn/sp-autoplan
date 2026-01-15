@@ -314,8 +314,7 @@ async function runAutoplan(dryRun = false) {
     console.log(`[AutoPlan] Skipped ${skippedParents.length} parent tasks`);
 
     // Run scheduling algorithm
-    // Pass allTasks for building parent hierarchy for base priority calculation
-    const schedule = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks, allTasks);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
 

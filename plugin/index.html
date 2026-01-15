@@ -407,7 +407,7 @@
       <div class="intro-content">
         <p><strong>AutoPlan automatically schedules your tasks</strong> by splitting them into time blocks and assigning them to your calendar based on calculated urgency.</p>
         <ol>
-          <li><strong>Priority Calculation:</strong> Each task gets a priority score based on its position in your list, tags, duration, and age</li>
+          <li><strong>Priority Calculation:</strong> Each task gets a priority score based on tags, projects, duration, and age</li>
           <li><strong>Task Splitting:</strong> Large tasks are split into manageable time blocks (e.g., 2-hour chunks)</li>
           <li><strong>Smart Scheduling:</strong> Blocks are scheduled iteratively - the most urgent task gets the next available slot, then priorities are recalculated</li>
           <li><strong>Calendar Integration:</strong> Scheduled blocks appear in your Super Productivity timeline</li>
@@ -416,9 +416,9 @@
       </div>
     </details>
     <div class="tip-box">
-      <strong>Tip: Control Task Priority with Ordering</strong>
-      <p>Base priority is determined by the order of your <em>parent tasks</em> (top-level tasks or tasks with subtasks) in Super Productivity. Subtasks inherit their parent's base priority.</p>
-      <p>To change which tasks get scheduled first: <strong>reorder your parent tasks in Super Productivity's task list</strong> - tasks at the top have higher base priority.</p>
+      <strong>Tip: Control Task Priority</strong>
+      <p>Use <strong>Tag Priorities</strong> and <strong>Project Priorities</strong> tabs to assign priority boosts to specific tags or projects.</p>
+      <p>Example: Add +20 to an "urgent" tag to schedule urgent tasks first, or -10 to a "low-priority" tag to push them later.</p>
     </div>
   </div>
 
@@ -683,10 +683,9 @@
       <div class="section-title">Total Priority Formula</div>
       <p class="section-description">The final priority score combines all factors:</p>
       <div class="formula-preview">
-        Total Priority = Base Priority + Tag Boosts + Project Boosts + Duration Factor + Oldness Factor
+        Total Priority = Tag Boosts + Project Boosts + Duration Factor + Oldness Factor
       </div>
       <p class="help-text" style="margin-top: 8px;">
-        <strong>Base Priority</strong> comes from parent task order (top of list = highest).<br>
         Tasks with higher total priority get scheduled first.
       </p>
     </div>

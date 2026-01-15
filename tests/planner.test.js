@@ -173,7 +173,7 @@ describe('AutoPlanner.schedule', () => {
 
     expect(schedule[0].urgency).toBeDefined();
     expect(schedule[0].urgencyComponents).toBeDefined();
-    expect(schedule[0].urgencyComponents.base).toBeDefined();
+    expect(schedule[0].urgencyComponents.tag).toBeDefined();
   });
 
   it('schedules by priority with tag boosts', () => {
