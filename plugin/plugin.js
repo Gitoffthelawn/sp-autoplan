@@ -782,11 +782,15 @@ const TaskMerger = {
  * Get scheduling fields for a task based on its scheduled time.
  * Uses dueWithTime (timestamp in milliseconds) for all tasks.
  * This ensures tasks scheduled for the future appear in Planner, not Today.
+ * 
+ * Note: dueDay and dueWithTime are mutually exclusive in Super Productivity.
+ * When setting dueWithTime, we must clear dueDay (use undefined, not null).
  */
 function getSchedulingFields(startTime) {
   return {
     dueWithTime: startTime.getTime(),
-    dueDay: null, // Clear dueDay to avoid conflicts
+    dueDay: undefined, // Clear dueDay to avoid conflicts (use undefined per SP's internal behavior)
+    hasPlannedTime: true, // Indicate this task has a specific scheduled time
   };
 }
 
@@ -1114,6 +1118,113 @@ async function previewSchedule() {
   return runAutoplan(true);
 }
 
+/**
+ * Clear planning (dueWithTime, dueDay, hasPlannedTime) from all tasks that:
+ * - Don't have the "Do Not Reschedule" tag
+ * - Have a time estimation
+ * - Are not completed
+ * 
+ * Also merges all split tasks back into their original tasks first.
+ */
+async function clearPlanning() {
+  console.log('[AutoPlan] Clearing planning from tasks...');
+
+  try {
+    const config = await loadConfig();
+    
+    // Step 1: Merge all split tasks first
+    console.log('[AutoPlan] Step 1: Merging split tasks...');
+    const splitGroups = await TaskMerger.findAllSplitGroupsAsync();
+    let mergedCount = 0;
+    
+    for (const group of splitGroups) {
+      // Get the first task ID from the group to trigger merge
+      const firstTaskId = group.splits[0];
+      try {
+        const result = await TaskMerger.mergeSplits(firstTaskId);
+        if (result) {
+          mergedCount++;
+          console.log(`[AutoPlan] Merged group: ${group.originalTitle}`);
+        }
+      } catch (e) {
+        console.warn(`[AutoPlan] Failed to merge group ${group.originalTitle}:`, e);
+      }
+    }
+    
+    console.log(`[AutoPlan] Merged ${mergedCount} split task groups`);
+
+    // Step 2: Clear planning from all eligible tasks
+    console.log('[AutoPlan] Step 2: Clearing planning...');
+    const allTasks = await PluginAPI.getTasks();
+
+    // Filter tasks that should have their planning cleared:
+    // - Not done
+    // - Has time estimate
+    // - Does NOT have the "do not reschedule" tag
+    const tasksToClear = allTasks.filter(task => {
+      // Skip completed tasks
+      if (task.isDone) return false;
+      
+      // Skip tasks without time estimate
+      if (!task.timeEstimate || task.timeEstimate <= 0) return false;
+      
+      // Skip tasks with "do not reschedule" tag
+      if (config.doNotRescheduleTagId && task.tagIds && task.tagIds.includes(config.doNotRescheduleTagId)) {
+        return false;
+      }
+      
+      // Only include tasks that have some planning set
+      if (!task.dueWithTime && !task.dueDay) return false;
+      
+      return true;
+    });
+
+    console.log(`[AutoPlan] Found ${tasksToClear.length} tasks to clear planning from`);
+
+    // Clear planning from each task
+    let clearedCount = 0;
+    for (const task of tasksToClear) {
+      try {
+        await PluginAPI.updateTask(task.id, {
+          dueWithTime: undefined,
+          dueDay: undefined,
+          hasPlannedTime: undefined,
+        });
+        clearedCount++;
+      } catch (e) {
+        console.warn(`[AutoPlan] Failed to clear planning for task ${task.id}:`, e);
+      }
+    }
+
+    // Build result message
+    let message = '';
+    if (mergedCount > 0 && clearedCount > 0) {
+      message = `Merged ${mergedCount} split groups, cleared planning from ${clearedCount} tasks`;
+    } else if (mergedCount > 0) {
+      message = `Merged ${mergedCount} split groups`;
+    } else if (clearedCount > 0) {
+      message = `Cleared planning from ${clearedCount} tasks`;
+    } else {
+      message = 'No tasks to clear planning from';
+    }
+
+    PluginAPI.showSnack({
+      msg: message,
+      type: mergedCount > 0 || clearedCount > 0 ? 'SUCCESS' : 'INFO',
+    });
+
+    return { merged: mergedCount, cleared: clearedCount };
+
+  } catch (error) {
+    console.error('[AutoPlan] Error clearing planning:', error);
+    PluginAPI.showSnack({
+      msg: `Error clearing planning: ${error.message}`,
+      type: 'ERROR',
+    });
+    throw error;
+  }
+}
+
 // ============================================================================
 // PLUGIN INITIALIZATION
 // ============================================================================
@@ -1140,6 +1251,7 @@ PluginAPI.registerShortcut({
 window.AutoPlanAPI = {
   runAutoplan,
   previewSchedule,
+  clearPlanning,
   loadConfig,
   saveConfig,
   getDefaultConfig: () => ({ ...DEFAULT_CONFIG }),

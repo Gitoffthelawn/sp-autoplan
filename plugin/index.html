@@ -727,6 +727,24 @@
         Run AutoPlan Now
       </button>
     </div>
+
+    <div class="section">
+      <div class="section-title">Clear Planning</div>
+      <p class="section-description">
+        Merge all split tasks back together and remove scheduled times, allowing you to start fresh.
+      </p>
+      
+      <div class="tip-box" style="margin-bottom: 16px;">
+        <strong>What happens:</strong>
+        <p>1. All split tasks (e.g., "Task &lt;I&gt;", "Task &lt;II&gt;") are merged back into single tasks</p>
+        <p>2. Scheduled times are removed from tasks with time estimates (except those with "Do Not Reschedule" tag)</p>
+        <p>This is useful when you want to re-run AutoPlan from scratch.</p>
+      </div>
+      
+      <button class="btn" onclick="handleClearPlanning()">
+        Clear All Planning
+      </button>
+    </div>
   </div>
 
   <!-- Merge Tasks Tab -->
@@ -1223,6 +1241,37 @@
       } catch (e) {
         console.error('AutoPlan failed:', e);
         showStatus('AutoPlan failed: ' + e.message, 'error');
+      }
+    }
+
+    // Clear planning from all eligible tasks
+    async function handleClearPlanning() {
+      if (!confirm('Are you sure you want to clear all planning?\n\nThis will:\n1. Merge all split tasks back together\n2. Remove scheduled times from tasks with time estimates\n\n(Tasks with "Do Not Reschedule" tag are not affected)')) {
+        return;
+      }
+
+      try {
+        // Try to communicate with plugin.js
+        if (window.parent && window.parent.AutoPlanAPI) {
+          const result = await window.parent.AutoPlanAPI.clearPlanning();
+          let message = '';
+          if (result.merged > 0 && result.cleared > 0) {
+            message = `Merged ${result.merged} split groups, cleared planning from ${result.cleared} tasks`;
+          } else if (result.merged > 0) {
+            message = `Merged ${result.merged} split groups`;
+          } else if (result.cleared > 0) {
+            message = `Cleared planning from ${result.cleared} tasks`;
+          } else {
+            message = 'No tasks to clear';
+          }
+          showStatus(message, 'success');
+        } else {
+          // Fallback: Show instructions
+          showStatus('AutoPlanAPI not available. Make sure the plugin is properly loaded.', 'error');
+        }
+      } catch (e) {
+        console.error('Clear planning failed:', e);
+        showStatus('Clear planning failed: ' + e.message, 'error');
       }
     }
 
