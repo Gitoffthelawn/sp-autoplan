@@ -104,6 +104,58 @@ describe('PriorityCalculator.calculateTagPriority', () => {
   });
 });
 
+describe('PriorityCalculator.calculateProjectPriority', () => {
+  const allProjects = [
+    { id: 'proj-work', title: 'Work' },
+    { id: 'proj-personal', title: 'Personal' },
+    { id: 'proj-someday', title: 'Someday' },
+  ];
+
+  const projectPriorities = {
+    Work: 15,
+    Personal: 5,
+    Someday: -10,
+  };
+
+  it('calculates project boost correctly', () => {
+    const task = createTask({ projectId: 'proj-work' });
+    expect(PriorityCalculator.calculateProjectPriority(task, projectPriorities, allProjects)).toBe(15);
+  });
+
+  it('handles negative project boosts', () => {
+    const task = createTask({ projectId: 'proj-someday' });
+    expect(PriorityCalculator.calculateProjectPriority(task, projectPriorities, allProjects)).toBe(-10);
+  });
+
+  it('returns 0 for task with no project', () => {
+    const task = createTask({ projectId: null });
+    expect(PriorityCalculator.calculateProjectPriority(task, projectPriorities, allProjects)).toBe(0);
+  });
+
+  it('returns 0 for undefined projectId', () => {
+    const task = createTask();
+    delete task.projectId;
+    expect(PriorityCalculator.calculateProjectPriority(task, projectPriorities, allProjects)).toBe(0);
+  });
+
+  it('ignores projects not in priority config', () => {
+    const task = createTask({ projectId: 'proj-unknown' });
+    const unknownProjects = [{ id: 'proj-unknown', title: 'Unknown Project' }];
+    expect(PriorityCalculator.calculateProjectPriority(task, projectPriorities, unknownProjects)).toBe(0);
+  });
+
+  it('handles null/undefined projectPriorities', () => {
+    const task = createTask({ projectId: 'proj-work' });
+    expect(PriorityCalculator.calculateProjectPriority(task, null, allProjects)).toBe(0);
+    expect(PriorityCalculator.calculateProjectPriority(task, undefined, allProjects)).toBe(0);
+  });
+
+  it('handles empty allProjects array', () => {
+    const task = createTask({ projectId: 'proj-work' });
+    expect(PriorityCalculator.calculateProjectPriority(task, projectPriorities, [])).toBe(0);
+  });
+});
+
 describe('PriorityCalculator.calculateDurationPriority', () => {
   it('calculates linear duration priority', () => {
     const task = createTask({ timeEstimate: 4 * 60 * 60 * 1000 }); // 4 hours
@@ -200,31 +252,35 @@ describe('PriorityCalculator.calculateOldnessPriority', () => {
 
 describe('PriorityCalculator.calculateUrgency', () => {
   const allTags = [{ id: 'tag-1', name: 'urgent' }];
+  const allProjects = [{ id: 'proj-1', title: 'Work' }];
   const config = {
     tagPriorities: { urgent: 10 },
+    projectPriorities: { Work: 5 },
     durationFormula: 'linear',
     durationWeight: 1,
     oldnessFormula: 'linear',
     oldnessWeight: 1,
   };
 
-  it('combines all priority components', () => {
+  it('combines all priority components including project', () => {
     const now = new Date('2024-01-15');
     const task = createTask({
       id: 'task-1',
       tagIds: ['tag-1'],
+      projectId: 'proj-1',
       timeEstimate: 2 * 60 * 60 * 1000, // 2 hours
       created: new Date('2024-01-10').getTime(), // 5 days ago
     });
     const tasks = [task];
 
-    const result = PriorityCalculator.calculateUrgency(task, tasks, config, allTags, now);
+    const result = PriorityCalculator.calculateUrgency(task, tasks, config, allTags, allProjects, now);
 
     expect(result.components.base).toBe(1); // Only task: N+1-1 = 1
     expect(result.components.tag).toBe(10);
+    expect(result.components.project).toBe(5);
     expect(result.components.duration).toBe(2);
     expect(result.components.oldness).toBe(5);
-    expect(result.total).toBe(1 + 10 + 2 + 5); // 18
+    expect(result.total).toBe(1 + 10 + 5 + 2 + 5); // 23
   });
 
   it('handles missing config properties with defaults', () => {
@@ -232,9 +288,28 @@ describe('PriorityCalculator.calculateUrgency', () => {
     const tasks = [task];
     const minimalConfig = {};
 
-    const result = PriorityCalculator.calculateUrgency(task, tasks, minimalConfig, []);
+    const result = PriorityCalculator.calculateUrgency(task, tasks, minimalConfig, [], []);
     
     expect(result.total).toBeGreaterThan(0);
     expect(result.components.base).toBe(1);
+    expect(result.components.project).toBe(0);
+  });
+
+  it('works without project priority', () => {
+    const now = new Date('2024-01-15');
+    const task = createTask({
+      id: 'task-1',
+      tagIds: ['tag-1'],
+      timeEstimate: 2 * 60 * 60 * 1000,
+      created: new Date('2024-01-10').getTime(), // 5 days before 'now'
+    });
+    const tasks = [task];
+    const configWithoutProjects = { ...config };
+    delete configWithoutProjects.projectPriorities;
+
+    const result = PriorityCalculator.calculateUrgency(task, tasks, configWithoutProjects, allTags, [], now);
+
+    expect(result.components.project).toBe(0);
+    expect(result.total).toBe(1 + 10 + 2 + 5); // 18
   });
 });

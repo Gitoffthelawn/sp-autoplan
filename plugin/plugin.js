@@ -25,6 +25,7 @@
 const DEFAULT_CONFIG = {
   blockSizeMinutes: 120, // 2 hours default block size
   tagPriorities: {}, // { tagName: priorityBoost }
+  projectPriorities: {}, // { projectName: priorityBoost }
   durationFormula: 'linear', // 'linear', 'inverse', 'log', 'none'
   durationWeight: 1.0,
   oldnessFormula: 'linear', // 'linear', 'log', 'exponential', 'none'
@@ -162,6 +163,20 @@ const PriorityCalculator = {
   },
 
   /**
+   * Calculate project-based priority boost
+   */
+  calculateProjectPriority(task, projectPriorities, allProjects) {
+    if (!task.projectId) return 0;
+    if (!projectPriorities || typeof projectPriorities !== 'object') return 0;
+    
+    const project = allProjects.find(p => p.id === task.projectId);
+    if (project && projectPriorities[project.title] !== undefined) {
+      return Number(projectPriorities[project.title]) || 0;
+    }
+    return 0;
+  },
+
+  /**
    * Calculate duration-based priority factor
    */
   calculateDurationPriority(task, formula, weight) {
@@ -222,12 +237,14 @@ const PriorityCalculator = {
    * @param {Array} parentTasks - Array of parent tasks in order (for base priority)
    * @param {Object} config - Configuration object
    * @param {Array} allTags - All available tags
+   * @param {Array} allProjects - All available projects
    * @param {Date} now - Current time for calculations
    * @param {Map} parentIdMap - Optional map of task ID to parent task
    */
-  calculateUrgency(task, parentTasks, config, allTags, now = new Date(), parentIdMap = null) {
+  calculateUrgency(task, parentTasks, config, allTags, allProjects = [], now = new Date(), parentIdMap = null) {
     const basePriority = this.calculateBasePriority(task, parentTasks, parentIdMap);
     const tagPriority = this.calculateTagPriority(task, config.tagPriorities || {}, allTags);
+    const projectPriority = this.calculateProjectPriority(task, config.projectPriorities || {}, allProjects);
     const durationPriority = this.calculateDurationPriority(
       task, config.durationFormula || 'linear', config.durationWeight ?? 1.0
     );
@@ -236,10 +253,11 @@ const PriorityCalculator = {
     );
 
     return {
-      total: basePriority + tagPriority + durationPriority + oldnessPriority,
+      total: basePriority + tagPriority + projectPriority + durationPriority + oldnessPriority,
       components: {
         base: basePriority,
         tag: tagPriority,
+        project: projectPriority,
         duration: durationPriority,
         oldness: oldnessPriority
       }
@@ -445,11 +463,12 @@ const AutoPlanner = {
    * @param {Array} splits - Task splits to schedule
    * @param {Object} config - Configuration object
    * @param {Array} allTags - All available tags
+   * @param {Array} allProjects - All available projects
    * @param {Date} startTime - When to start scheduling from
    * @param {Array} fixedTasks - Tasks that should not be rescheduled (optional)
    * @param {Array} allTasks - All tasks (for building parent hierarchy) (optional)
    */
-  schedule(splits, config, allTags, startTime = new Date(), fixedTasks = [], allTasks = []) {
+  schedule(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = [], allTasks = []) {
     if (splits.length === 0) return [];
 
     const schedule = [];
@@ -544,6 +563,7 @@ const AutoPlanner = {
           parentTasks, // Use parent tasks for base priority calculation
           config,
           allTags,
+          allProjects,
           simulatedTime,
           taskMap // Pass task map for parent lookup
         );
@@ -1002,9 +1022,10 @@ async function runAutoplan(dryRun = false) {
     // Load config
     const config = await loadConfig();
 
-    // Get all tasks and tags
+    // Get all tasks, tags, and projects
     const allTasks = await PluginAPI.getTasks();
     const allTags = await PluginAPI.getAllTags();
+    const allProjects = await PluginAPI.getAllProjects();
 
     console.log(`[AutoPlan] Processing ${allTasks.length} tasks`);
 
@@ -1046,7 +1067,7 @@ async function runAutoplan(dryRun = false) {
 
     // Run scheduling algorithm
     // Pass allTasks for building parent hierarchy for base priority calculation
-    const schedule = AutoPlanner.schedule(splits, config, allTags, new Date(), fixedTasks, allTasks);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks, allTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
 

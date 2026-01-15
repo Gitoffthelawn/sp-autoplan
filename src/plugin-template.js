@@ -247,9 +247,10 @@ async function runAutoplan(dryRun = false) {
     // Load config
     const config = await loadConfig();
 
-    // Get all tasks and tags
+    // Get all tasks, tags, and projects
     const allTasks = await PluginAPI.getTasks();
     const allTags = await PluginAPI.getAllTags();
+    const allProjects = await PluginAPI.getAllProjects();
 
     console.log(`[AutoPlan] Processing ${allTasks.length} tasks`);
 
@@ -291,7 +292,7 @@ async function runAutoplan(dryRun = false) {
 
     // Run scheduling algorithm
     // Pass allTasks for building parent hierarchy for base priority calculation
-    const schedule = AutoPlanner.schedule(splits, config, allTags, new Date(), fixedTasks, allTasks);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks, allTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
 

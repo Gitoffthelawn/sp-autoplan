@@ -427,6 +427,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="settings">Settings</div>
     <div class="tab" data-tab="tags">Tag Priorities</div>
+    <div class="tab" data-tab="projects">Project Priorities</div>
     <div class="tab" data-tab="formulas">Priority Formulas</div>
     <div class="tab" data-tab="schedule">Schedule</div>
     <div class="tab" data-tab="merge">Merge Tasks</div>
@@ -578,6 +579,43 @@
 
   </div>
 
+  <!-- Project Priorities Tab -->
+  <div id="tab-projects" class="tab-content">
+    <div class="section">
+      <div class="section-title">Project Priority Boosts</div>
+      <p class="section-description">
+        Give tasks in certain projects higher or lower priority.
+      </p>
+      
+      <div class="tip-box" style="margin-bottom: 16px;">
+        <strong>How Project Priorities Work</strong>
+        <p>When a task belongs to a project listed here, that boost value is added to its total priority score. Tasks with higher priority get scheduled earlier.</p>
+        <p><strong>Examples:</strong> Add +15 to "Work" project to prioritize work tasks. Add -5 to "Someday" to push those tasks later.</p>
+      </div>
+      
+      <table class="tag-table" id="projectTable">
+        <thead>
+          <tr>
+            <th>Project Name</th>
+            <th>Priority Boost</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="projectTableBody">
+          <!-- Projects will be populated here -->
+        </tbody>
+      </table>
+
+      <div class="add-tag-row">
+        <input type="text" id="newProjectName" placeholder="Enter project name (must match exactly)">
+        <input type="number" id="newProjectPriority" placeholder="Boost" value="10" style="width: 80px;">
+        <button class="btn btn-small" onclick="addProjectPriority()">Add Project</button>
+      </div>
+      <p class="help-text">Project names must match exactly as they appear in Super Productivity (case-sensitive). Use the project title, not ID.</p>
+    </div>
+
+  </div>
+
   <!-- Priority Formulas Tab -->
   <div id="tab-formulas" class="tab-content">
     <div class="tip-box" style="margin-bottom: 20px;">
@@ -645,7 +683,7 @@
       <div class="section-title">Total Priority Formula</div>
       <p class="section-description">The final priority score combines all factors:</p>
       <div class="formula-preview">
-        Total Priority = Base Priority + Tag Boosts + Duration Factor + Oldness Factor
+        Total Priority = Base Priority + Tag Boosts + Project Boosts + Duration Factor + Oldness Factor
       </div>
       <p class="help-text" style="margin-top: 8px;">
         <strong>Base Priority</strong> comes from parent task order (top of list = highest).<br>
@@ -836,6 +874,7 @@
       return {
         blockSizeMinutes: 120,
         tagPriorities: {},
+        projectPriorities: {},
         durationFormula: 'linear',
         durationWeight: 1.0,
         oldnessFormula: 'linear',
@@ -878,6 +917,7 @@
       }
 
       updateTagTable();
+      updateProjectTable();
       updateFormulaPreview();
     }
 
@@ -907,6 +947,7 @@
         workdayHours: parseInt(document.getElementById('workdayHours').value) || 8,
         skipDays: skipDays,
         tagPriorities: currentConfig.tagPriorities || {},
+        projectPriorities: currentConfig.projectPriorities || {},
         doNotRescheduleTagId: doNotRescheduleTagId,
       };
     }
@@ -991,6 +1032,67 @@
     function removeTagPriority(name) {
       delete currentConfig.tagPriorities[name];
       updateTagTable();
+    }
+
+    // Project priority management
+    function updateProjectTable() {
+      const tbody = document.getElementById('projectTableBody');
+      tbody.innerHTML = '';
+      
+      const projectPriorities = currentConfig.projectPriorities || {};
+      
+      for (const [projectName, priority] of Object.entries(projectPriorities)) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td><span class="tag-badge">${escapeHtml(projectName)}</span></td>
+          <td>
+            <input type="number" value="${priority}" 
+                   onchange="updateProjectPriority('${escapeHtml(projectName)}', this.value)">
+          </td>
+          <td>
+            <button class="btn btn-small" onclick="removeProjectPriority('${escapeHtml(projectName)}')">
+              Remove
+            </button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      }
+
+      if (Object.keys(projectPriorities).length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="opacity: 0.7; text-align: center;">No project priorities configured</td></tr>';
+      }
+    }
+
+    function addProjectPriority() {
+      const nameInput = document.getElementById('newProjectName');
+      const priorityInput = document.getElementById('newProjectPriority');
+      
+      const name = nameInput.value.trim();
+      const priority = parseFloat(priorityInput.value) || 0;
+      
+      if (!name) {
+        showStatus('Please enter a project name', 'error');
+        return;
+      }
+
+      if (!currentConfig.projectPriorities) {
+        currentConfig.projectPriorities = {};
+      }
+      
+      currentConfig.projectPriorities[name] = priority;
+      updateProjectTable();
+      
+      nameInput.value = '';
+      priorityInput.value = '10';
+    }
+
+    function updateProjectPriority(name, value) {
+      currentConfig.projectPriorities[name] = parseFloat(value) || 0;
+    }
+
+    function removeProjectPriority(name) {
+      delete currentConfig.projectPriorities[name];
+      updateProjectTable();
     }
 
 

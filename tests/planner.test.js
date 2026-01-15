@@ -74,7 +74,7 @@ describe('AutoPlanner.schedule', () => {
     }
 
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, allTags, startTime);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, [], startTime);
 
     expect(schedule).toHaveLength(2);
     // First task has higher base priority (position 1 of 2)
@@ -93,7 +93,7 @@ describe('AutoPlanner.schedule', () => {
     expect(splits).toHaveLength(6);
 
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, allTags, startTime);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, [], startTime);
 
     expect(schedule).toHaveLength(6);
 
@@ -113,7 +113,7 @@ describe('AutoPlanner.schedule', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config);
     const startTime = new Date('2024-01-15T14:00:00'); // 2 PM = 5 hours into workday
-    const schedule = AutoPlanner.schedule(splits, config, allTags, startTime);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, [], startTime);
 
     expect(schedule).toHaveLength(1);
     // Should start at 2 PM (14:00)
@@ -129,7 +129,7 @@ describe('AutoPlanner.schedule', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config);
     const startTime = new Date('2024-01-15T18:00:00'); // 6 PM - after 8h workday
-    const schedule = AutoPlanner.schedule(splits, config, allTags, startTime);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, [], startTime);
 
     expect(schedule).toHaveLength(1);
     expect(schedule[0].startTime.getDate()).toBe(16); // Next day
@@ -145,7 +145,7 @@ describe('AutoPlanner.schedule', () => {
     const splits = TaskSplitter.splitTask(task, 120, limitedConfig);
 
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, limitedConfig, allTags, startTime);
+    const schedule = AutoPlanner.schedule(splits, limitedConfig, allTags, [], startTime);
 
     // Should stop before scheduling all blocks
     expect(schedule.length).toBeLessThan(splits.length);
@@ -157,7 +157,7 @@ describe('AutoPlanner.schedule', () => {
   });
 
   it('returns empty array for empty splits', () => {
-    const schedule = AutoPlanner.schedule([], config, allTags);
+    const schedule = AutoPlanner.schedule([], config, allTags, []);
     expect(schedule).toHaveLength(0);
   });
 
@@ -169,7 +169,7 @@ describe('AutoPlanner.schedule', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config);
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, allTags, startTime);
+    const schedule = AutoPlanner.schedule(splits, config, allTags, [], startTime);
 
     expect(schedule[0].urgency).toBeDefined();
     expect(schedule[0].urgencyComponents).toBeDefined();
@@ -194,7 +194,7 @@ describe('AutoPlanner.schedule', () => {
     }
 
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, tagConfig, allTagsList, startTime);
+    const schedule = AutoPlanner.schedule(splits, tagConfig, allTagsList, [], startTime);
 
     // Urgent task should be scheduled first despite being second in list
     expect(schedule[0].split.originalTaskId).toBe('task-2');
@@ -220,7 +220,7 @@ describe('AutoPlanner.schedule', () => {
     }
 
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, longTaskConfig, [], startTime);
+    const schedule = AutoPlanner.schedule(splits, longTaskConfig, [], [], startTime);
 
     // Short task should be scheduled first due to inverse duration formula
     expect(schedule[0].split.originalTaskId).toBe('short');
@@ -304,7 +304,7 @@ describe('AutoPlanner.schedule with skipDays', () => {
     const splits = TaskSplitter.splitTask(task, 120, config);
     // Friday Jan 12, 2024
     const startTime = new Date('2024-01-12T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime);
 
     // Should have 12 blocks (24h / 2h)
     expect(schedule.length).toBe(12);
@@ -337,7 +337,7 @@ describe('AutoPlanner.schedule with skipDays', () => {
     const splits = TaskSplitter.splitTask(task, 120, config);
     // Saturday Jan 13, 2024
     const startTime = new Date('2024-01-13T10:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime);
 
     expect(schedule.length).toBe(1);
     // Should be scheduled on Monday Jan 15
@@ -354,7 +354,7 @@ describe('AutoPlanner.schedule with skipDays', () => {
     const splits = TaskSplitter.splitTask(task, 120, config);
     // Sunday Jan 14, 2024
     const startTime = new Date('2024-01-14T10:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime);
 
     expect(schedule.length).toBe(1);
     // Should be scheduled on Monday Jan 15
@@ -371,7 +371,7 @@ describe('AutoPlanner.schedule with skipDays', () => {
     const splits = TaskSplitter.splitTask(task, 120, noSkipConfig);
     // Friday Jan 12
     const startTime = new Date('2024-01-12T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, noSkipConfig, [], startTime);
+    const schedule = AutoPlanner.schedule(splits, noSkipConfig, [], [], startTime);
 
     // Should schedule on Friday (4 blocks) and Saturday (4 blocks)
     const fridayBlocks = schedule.filter(s => s.startTime.getDate() === 12);
@@ -499,7 +499,7 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config); // 2-hour blocks = 3 splits
     const startTime = new Date('2024-01-15T09:00:00'); // Monday
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime, fixedTasks);
 
     expect(schedule.length).toBe(3);
 
@@ -527,7 +527,7 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config);
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime, fixedTasks);
 
     expect(schedule.length).toBe(1);
     // Should skip Jan 15 entirely and schedule on Jan 16
@@ -549,7 +549,7 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config);
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime, fixedTasks);
 
     expect(schedule.length).toBe(1);
     // Should skip to next day
@@ -566,7 +566,7 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
     const startTime = new Date('2024-01-15T09:00:00');
     
     // Call with empty fixed tasks array
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime, []);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime, []);
 
     expect(schedule.length).toBe(2);
     // All should be on the same day
@@ -595,7 +595,7 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
 
     const splits = TaskSplitter.splitTask(task, 120, config); // 5 blocks of 2 hours
     const startTime = new Date('2024-01-15T09:00:00');
-    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+    const schedule = AutoPlanner.schedule(splits, config, [], [], startTime, fixedTasks);
 
     expect(schedule.length).toBe(5);
 
