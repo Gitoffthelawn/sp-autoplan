@@ -12,10 +12,11 @@ Intelligently schedule your tasks based on urgency. Inspired by the proven appro
 ## Quick Start
 
 1. Add time estimates to your tasks (required for scheduling)
-2. Click **"Run AutoPlan Now"** 
+2. Click **"Run AutoPlan Now"**
 3. Your tasks are split into blocks and scheduled to your calendar
 
-That's it. Everything works with sensible defaults. Reorder tasks to change base priority, or use the settings tabs to fine-tune with tags and projects.
+That's it. I strongly recommend to adjust the settings and save them. Each option in the UI is
+self-explained.
 
 ## Features
 
@@ -29,7 +30,6 @@ That's it. Everything works with sensible defaults. Reorder tasks to change base
 
 1. Clear previous schedules and merge any split tasks
 2. Calculate urgency for each task based on:
-   - Base priority (your task order)
    - Tag boosts (add +20 to "urgent" tag)
    - Project boosts (add +15 to "Work" project)
    - Duration (prefer quick wins or tackle big tasks)
@@ -51,18 +51,14 @@ Use the **Schedule** tab to preview what will be scheduled before applying chang
 
 ## Important Caveats
 
-**Super Productivity has no priority field.** AutoPlan rebuilds urgency using task order (reorder to change base priority), tags, and projects. Use the dry-run preview to verify the schedule matches your expectations.
+**Super Productivity has no priority field.** AutoPlan rebuilds urgency using tags, projects, task elderliness, and estimated completion time. Use the dry-run preview to verify the schedule matches your expectations.
 
-**Task splitting creates multiple tasks.** AutoPlan splits large tasks into "Task <I>", "Task <II>", etc. This means:
+**Super Productivity doesn't support scheduling tasks only partially.** AutoPlan splits large tasks into `Task <I>`, `Task <II>`, etc. This means:
 - Task count changes each run
 - Could conflict with other plugins that manipulate tasks
 - Use the Merge tab to manually consolidate if needed
 
-**Calendar integration is immature.** Import calendar events as tasks with a "fixed" tag to protect them from AutoPlan.
-
-## Keyboard Shortcuts
-
-- `Ctrl+Shift+A`: Open AutoPlan
+**Super Conductivity still has primitive calendar integration.** Import calendar events as tasks with a "fixed" tag to protect them from AutoPlan.
 
 ## Development
 
