@@ -94,6 +94,67 @@
       margin-top: 4px;
     }
 
+    .section-description {
+      font-size: 0.9em;
+      opacity: 0.7;
+      margin-bottom: 12px;
+    }
+
+    /* Intro section */
+    .intro-section {
+      margin-bottom: 20px;
+    }
+
+    .how-it-works {
+      margin-bottom: 12px;
+    }
+
+    .how-it-works summary {
+      cursor: pointer;
+      font-weight: 500;
+      opacity: 0.8;
+      padding: 8px 0;
+    }
+
+    .how-it-works summary:hover {
+      opacity: 1;
+    }
+
+    .intro-content {
+      padding: 12px;
+      background: rgba(128, 128, 128, 0.1);
+      border-radius: 4px;
+      margin-top: 8px;
+    }
+
+    .intro-content ol {
+      padding-left: 20px;
+      margin: 12px 0;
+    }
+
+    .intro-content li {
+      margin-bottom: 8px;
+    }
+
+    .tip-box {
+      padding: 12px;
+      background: rgba(124, 77, 255, 0.1);
+      border-left: 3px solid var(--c-primary, #7c4dff);
+      border-radius: 4px;
+      margin-bottom: 16px;
+    }
+
+    .tip-box p {
+      margin: 8px 0 0 0;
+      font-size: 0.9em;
+      opacity: 0.85;
+    }
+
+    .tip-box strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
     /* Tag Priorities Table */
     .tag-table {
       width: 100%;
@@ -339,7 +400,27 @@
   </div>
 
   <h1>AutoPlan Settings</h1>
-  <p class="subtitle">Configure automatic task scheduling and priority calculation</p>
+  <div class="intro-section">
+    <p class="subtitle">Automatic task scheduling based on priority and urgency</p>
+    <details class="how-it-works">
+      <summary>How AutoPlan Works</summary>
+      <div class="intro-content">
+        <p><strong>AutoPlan automatically schedules your tasks</strong> by splitting them into time blocks and assigning them to your calendar based on calculated urgency.</p>
+        <ol>
+          <li><strong>Priority Calculation:</strong> Each task gets a priority score based on its position in your list, tags, duration, and age</li>
+          <li><strong>Task Splitting:</strong> Large tasks are split into manageable time blocks (e.g., 2-hour chunks)</li>
+          <li><strong>Smart Scheduling:</strong> Blocks are scheduled iteratively - the most urgent task gets the next available slot, then priorities are recalculated</li>
+          <li><strong>Calendar Integration:</strong> Scheduled blocks appear in your Super Productivity timeline</li>
+        </ol>
+        <p><strong>Requirements:</strong> Tasks must have a time estimate to be scheduled. Tasks without estimates are skipped.</p>
+      </div>
+    </details>
+    <div class="tip-box">
+      <strong>Tip: Control Task Priority with Ordering</strong>
+      <p>Base priority is determined by the order of your <em>parent tasks</em> (top-level tasks or tasks with subtasks) in Super Productivity. Subtasks inherit their parent's base priority.</p>
+      <p>To change which tasks get scheduled first: <strong>reorder your parent tasks in Super Productivity's task list</strong> - tasks at the top have higher base priority.</p>
+    </div>
+  </div>
 
   <div id="status" class="status"></div>
 
@@ -355,55 +436,77 @@
   <div id="tab-settings" class="tab-content active">
     <div class="section">
       <div class="section-title">Block Settings</div>
+      <p class="section-description">Control how tasks are divided into schedulable time blocks.</p>
       
       <div class="form-group">
         <label for="blockSize">Block Size (minutes)</label>
         <input type="number" id="blockSize" min="15" max="480" step="15" value="120">
-        <p class="help-text">Tasks will be split into blocks of this duration (default: 120 = 2 hours)</p>
+        <p class="help-text">Large tasks are split into blocks of this duration. Example: A 6-hour task with 120-minute blocks becomes 3 separate 2-hour blocks that can be scheduled on different days.</p>
       </div>
 
       <div class="row">
         <div class="form-group">
-          <label for="maxDays">Max Days Ahead</label>
+          <label for="maxDays">Planning Horizon (days)</label>
           <input type="number" id="maxDays" min="1" max="365" value="30">
+          <p class="help-text">How far ahead to schedule tasks. Tasks won't be scheduled beyond this many days from today.</p>
         </div>
         <div class="form-group">
           <div class="checkbox-group" style="margin-top: 28px;">
             <input type="checkbox" id="autoRun">
             <label for="autoRun">Auto-run on startup</label>
           </div>
+          <p class="help-text">Automatically reschedule all tasks when Super Productivity starts.</p>
         </div>
       </div>
     </div>
 
     <div class="section">
       <div class="section-title">Task Splitting</div>
+      <p class="section-description">Configure how split tasks are named.</p>
       
       <div class="form-group">
         <div class="checkbox-group">
           <input type="checkbox" id="splitSuffix" checked>
           <label for="splitSuffix">Add Roman numeral suffix (I, II, III...)</label>
         </div>
+        <p class="help-text">When enabled, split tasks are named "Task Name I", "Task Name II", etc. When disabled, all splits keep the original task name.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Fixed Tasks (Do Not Reschedule)</div>
+      <p class="section-description">Some tasks have fixed times (meetings, appointments) and shouldn't be moved by AutoPlan.</p>
+      
+      <div class="form-group">
+        <label for="doNotRescheduleTag">Do Not Reschedule Tag</label>
+        <select id="doNotRescheduleTag">
+          <option value="">(None - reschedule all tasks)</option>
+          <!-- Tags will be populated dynamically -->
+        </select>
+        <p class="help-text">Tasks with this tag will keep their existing schedule and won't be rescheduled. Their time is subtracted from available hours on those days, so other tasks schedule around them.</p>
       </div>
     </div>
 
     <div class="section">
       <div class="section-title">Work Schedule</div>
+      <p class="section-description">Define your available working hours. Tasks will only be scheduled during these times.</p>
       
       <div class="row">
         <div class="form-group">
-          <label for="workdayStartHour">Workday Start Hour</label>
+          <label for="workdayStartHour">Workday Start Hour (0-23)</label>
           <input type="number" id="workdayStartHour" min="0" max="23" value="9">
+          <p class="help-text">Hour when your workday begins (24-hour format). Example: 9 = 9:00 AM</p>
         </div>
         <div class="form-group">
           <label for="workdayHours">Workday Length (hours)</label>
           <input type="number" id="workdayHours" min="1" max="24" value="8">
+          <p class="help-text">How many hours you work per day. Example: 8 hours starting at 9 AM = work until 5 PM</p>
         </div>
       </div>
 
       <div class="form-group">
-        <label>Skip Days</label>
-        <p class="help-text" style="margin-bottom: 8px;">Select days to exclude from scheduling</p>
+        <label>Days Off</label>
+        <p class="help-text" style="margin-bottom: 8px;">Select days when no tasks should be scheduled (weekends, rest days, etc.)</p>
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
           <label class="checkbox-group" style="min-width: 100px;">
             <input type="checkbox" id="skipDay0" checked>
@@ -442,9 +545,15 @@
   <div id="tab-tags" class="tab-content">
     <div class="section">
       <div class="section-title">Tag Priority Boosts</div>
-      <p class="help-text" style="margin-bottom: 16px;">
-        Assign priority boosts to tags. Positive values increase priority, negative values decrease it.
+      <p class="section-description">
+        Give certain types of tasks higher or lower priority based on their tags.
       </p>
+      
+      <div class="tip-box" style="margin-bottom: 16px;">
+        <strong>How Tag Priorities Work</strong>
+        <p>When a task has a tag listed here, that boost value is added to its total priority score. Tasks with higher priority get scheduled earlier.</p>
+        <p><strong>Examples:</strong> Add +20 to "Urgent" tag to schedule urgent tasks sooner. Add -10 to "Low Priority" to push those tasks later.</p>
+      </div>
       
       <table class="tag-table" id="tagTable">
         <thead>
@@ -460,35 +569,42 @@
       </table>
 
       <div class="add-tag-row">
-        <input type="text" id="newTagName" placeholder="Tag name">
+        <input type="text" id="newTagName" placeholder="Enter tag name (must match exactly)">
         <input type="number" id="newTagPriority" placeholder="Boost" value="10" style="width: 80px;">
         <button class="btn btn-small" onclick="addTagPriority()">Add Tag</button>
       </div>
+      <p class="help-text">Tag names must match exactly as they appear in Super Productivity (case-sensitive).</p>
     </div>
 
   </div>
 
   <!-- Priority Formulas Tab -->
   <div id="tab-formulas" class="tab-content">
+    <div class="tip-box" style="margin-bottom: 20px;">
+      <strong>Understanding Priority Formulas</strong>
+      <p>These formulas add bonus priority based on task characteristics. The weight controls how much influence each factor has on the final priority score.</p>
+    </div>
+
     <div class="section">
       <div class="section-title">Duration Priority Formula</div>
-      <p class="help-text" style="margin-bottom: 16px;">
-        How task duration affects priority. Inverse = shorter tasks get higher priority.
+      <p class="section-description">
+        Should shorter or longer tasks be prioritized?
       </p>
       
       <div class="row">
         <div class="form-group">
           <label for="durationFormula">Formula Type</label>
           <select id="durationFormula">
-            <option value="none">None (disabled)</option>
-            <option value="linear">Linear (hours)</option>
-            <option value="inverse">Inverse (1/(hours+1))</option>
-            <option value="log">Logarithmic (log(hours+1))</option>
+            <option value="none">None (duration doesn't affect priority)</option>
+            <option value="linear">Linear - longer tasks = higher priority</option>
+            <option value="inverse">Inverse - shorter tasks = higher priority</option>
+            <option value="log">Logarithmic - moderate effect, diminishing returns</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="durationWeight">Weight</label>
+          <label for="durationWeight">Weight (0-10)</label>
           <input type="number" id="durationWeight" min="0" max="10" step="0.1" value="1.0">
+          <p class="help-text">Higher = stronger effect. Set to 0 to disable.</p>
         </div>
       </div>
 
@@ -499,23 +615,24 @@
 
     <div class="section">
       <div class="section-title">Oldness Priority Formula</div>
-      <p class="help-text" style="margin-bottom: 16px;">
-        How task age affects priority. Older tasks can get higher priority to prevent them from being forgotten.
+      <p class="section-description">
+        Should older tasks be prioritized to prevent them from being forgotten?
       </p>
       
       <div class="row">
         <div class="form-group">
           <label for="oldnessFormula">Formula Type</label>
           <select id="oldnessFormula">
-            <option value="none">None (disabled)</option>
-            <option value="linear">Linear (days)</option>
-            <option value="log">Logarithmic (log(days+1))</option>
-            <option value="exponential">Exponential (1.1^days)</option>
+            <option value="none">None (age doesn't affect priority)</option>
+            <option value="linear">Linear - priority grows steadily with age</option>
+            <option value="log">Logarithmic - quick initial boost, then levels off</option>
+            <option value="exponential">Exponential - old tasks become very urgent</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="oldnessWeight">Weight</label>
+          <label for="oldnessWeight">Weight (0-10)</label>
           <input type="number" id="oldnessWeight" min="0" max="10" step="0.1" value="1.0">
+          <p class="help-text">Higher = stronger effect. Set to 0 to disable.</p>
         </div>
       </div>
 
@@ -526,9 +643,14 @@
 
     <div class="section">
       <div class="section-title">Total Priority Formula</div>
+      <p class="section-description">The final priority score combines all factors:</p>
       <div class="formula-preview">
-        Total Priority = Base(N+1-rank) + TagBoosts + DurationPriority + OldnessPriority
+        Total Priority = Base Priority + Tag Boosts + Duration Factor + Oldness Factor
       </div>
+      <p class="help-text" style="margin-top: 8px;">
+        <strong>Base Priority</strong> comes from parent task order (top of list = highest).<br>
+        Tasks with higher total priority get scheduled first.
+      </p>
     </div>
   </div>
 
@@ -536,8 +658,8 @@
   <div id="tab-schedule" class="tab-content">
     <div class="section">
       <div class="section-title">Schedule Preview</div>
-      <p class="help-text" style="margin-bottom: 16px;">
-        Preview how your tasks will be scheduled without making changes.
+      <p class="section-description">
+        See how your tasks will be scheduled before applying changes. This is a dry run - no tasks are modified.
       </p>
       
       <button class="btn" onclick="previewSchedule()">
@@ -550,12 +672,20 @@
     </div>
 
     <div class="section">
-      <div class="section-title">Run AutoPlan</div>
-      <p class="help-text" style="margin-bottom: 16px;">
-        Apply the scheduling algorithm to your tasks. This will create new split tasks and update schedules.
+      <div class="section-title">Apply Schedule</div>
+      <p class="section-description">
+        Run the scheduling algorithm and apply changes to your tasks.
       </p>
       
-      <button class="btn" onclick="runAutoplan()">
+      <div class="tip-box" style="margin-bottom: 16px;">
+        <strong>What happens when you run AutoPlan:</strong>
+        <p>1. Tasks with time estimates are split into blocks (based on Block Size setting)</p>
+        <p>2. Each block is scheduled to your calendar based on priority</p>
+        <p>3. Original tasks are replaced with split tasks (e.g., "Task I", "Task II")</p>
+        <p>You can undo splits using the Merge tab.</p>
+      </div>
+      
+      <button class="btn btn-primary" onclick="runAutoplan()">
         Run AutoPlan Now
       </button>
     </div>
@@ -565,8 +695,8 @@
   <div id="tab-merge" class="tab-content">
     <div class="section">
       <div class="section-title">Split Task Groups</div>
-      <p class="help-text" style="margin-bottom: 16px;">
-        View and merge split tasks back into a single task. This is useful if you want to undo a split or consolidate remaining work.
+      <p class="section-description">
+        When AutoPlan splits a task into multiple blocks, you can merge them back together here.
       </p>
       
       <button class="btn" onclick="loadSplitGroups()">
@@ -580,13 +710,16 @@
 
     <div class="section">
       <div class="section-title">How Merging Works</div>
-      <ul style="opacity: 0.7; padding-left: 20px;">
-        <li>Merging combines all incomplete splits of a task</li>
-        <li>Time estimates are summed together</li>
-        <li>The first incomplete split becomes the merged task</li>
-        <li>Other splits are marked as completed</li>
-        <li>The original task title is restored (without Roman numerals)</li>
+      <p class="section-description">When you merge split tasks:</p>
+      <ul style="opacity: 0.8; padding-left: 20px; line-height: 1.6;">
+        <li><strong>Incomplete splits</strong> are combined into one task</li>
+        <li><strong>Time estimates</strong> from all splits are summed together</li>
+        <li><strong>The original title</strong> is restored (Roman numerals removed)</li>
+        <li><strong>Completed splits</strong> are deleted (their work is already done)</li>
       </ul>
+      <p class="help-text" style="margin-top: 12px;">
+        Use this when you want to reschedule a task differently, or if you finished the work faster than expected.
+      </p>
     </div>
   </div>
 
@@ -660,11 +793,41 @@
         } else {
           currentConfig = getDefaultConfig();
         }
+        // Populate tag dropdown before applying settings
+        await populateTagDropdown();
         applySettingsToUI();
       } catch (e) {
         console.error('Failed to load settings:', e);
         currentConfig = getDefaultConfig();
         applySettingsToUI();
+      }
+    }
+
+    // Populate the "Do Not Reschedule" tag dropdown with available tags
+    async function populateTagDropdown() {
+      try {
+        const tags = await PluginAPI.getAllTags();
+        const select = document.getElementById('doNotRescheduleTag');
+        
+        // Clear existing options except the first one (None)
+        while (select.options.length > 1) {
+          select.remove(1);
+        }
+        
+        // Add tags as options
+        for (const tag of tags) {
+          const option = document.createElement('option');
+          option.value = tag.id;
+          option.textContent = tag.title;
+          select.appendChild(option);
+        }
+        
+        // Re-apply the selected value if we have one
+        if (currentConfig.doNotRescheduleTagId) {
+          select.value = currentConfig.doNotRescheduleTagId;
+        }
+      } catch (e) {
+        console.error('Failed to load tags:', e);
       }
     }
 
@@ -683,6 +846,7 @@
         workdayStartHour: 9,
         workdayHours: 8,
         skipDays: [0, 6], // Sunday and Saturday
+        doNotRescheduleTagId: null,
       };
     }
 
@@ -707,6 +871,12 @@
         document.getElementById(`skipDay${i}`).checked = skipDays.includes(i);
       }
 
+      // Apply do not reschedule tag (dropdown populated separately)
+      const doNotRescheduleSelect = document.getElementById('doNotRescheduleTag');
+      if (doNotRescheduleSelect && currentConfig.doNotRescheduleTagId) {
+        doNotRescheduleSelect.value = currentConfig.doNotRescheduleTagId;
+      }
+
       updateTagTable();
       updateFormulaPreview();
     }
@@ -721,6 +891,9 @@
         }
       }
 
+      // Get do not reschedule tag
+      const doNotRescheduleTagId = document.getElementById('doNotRescheduleTag').value || null;
+
       return {
         blockSizeMinutes: parseInt(document.getElementById('blockSize').value) || 120,
         maxDaysAhead: parseInt(document.getElementById('maxDays').value) || 30,
@@ -734,6 +907,7 @@
         workdayHours: parseInt(document.getElementById('workdayHours').value) || 8,
         skipDays: skipDays,
         tagPriorities: currentConfig.tagPriorities || {},
+        doNotRescheduleTagId: doNotRescheduleTagId,
       };
     }
 

@@ -381,3 +381,234 @@ describe('AutoPlanner.schedule with skipDays', () => {
     expect(saturdayBlocks.length).toBe(4);
   });
 });
+
+describe('AutoPlanner.getDateKey', () => {
+  it('formats date as YYYY-MM-DD', () => {
+    const date = new Date('2024-01-15T10:30:00');
+    expect(AutoPlanner.getDateKey(date)).toBe('2024-01-15');
+  });
+
+  it('pads month and day with zeros', () => {
+    const date = new Date('2024-03-05T10:30:00');
+    expect(AutoPlanner.getDateKey(date)).toBe('2024-03-05');
+  });
+});
+
+describe('AutoPlanner.calculateFixedMinutesPerDay', () => {
+  it('returns empty object for no fixed tasks', () => {
+    const result = AutoPlanner.calculateFixedMinutesPerDay([]);
+    expect(result).toEqual({});
+  });
+
+  it('calculates minutes for a single fixed task', () => {
+    const fixedTasks = [{
+      id: 'fixed-1',
+      title: 'Fixed Task',
+      dueWithTime: new Date('2024-01-15T14:00:00').getTime(),
+      timeEstimate: 2 * 60 * 60 * 1000, // 2 hours = 120 minutes
+    }];
+
+    const result = AutoPlanner.calculateFixedMinutesPerDay(fixedTasks);
+    expect(result['2024-01-15']).toBe(120);
+  });
+
+  it('sums multiple fixed tasks on the same day', () => {
+    const fixedTasks = [
+      {
+        id: 'fixed-1',
+        dueWithTime: new Date('2024-01-15T10:00:00').getTime(),
+        timeEstimate: 2 * 60 * 60 * 1000, // 2 hours
+      },
+      {
+        id: 'fixed-2',
+        dueWithTime: new Date('2024-01-15T14:00:00').getTime(),
+        timeEstimate: 1 * 60 * 60 * 1000, // 1 hour
+      },
+    ];
+
+    const result = AutoPlanner.calculateFixedMinutesPerDay(fixedTasks);
+    expect(result['2024-01-15']).toBe(180); // 3 hours
+  });
+
+  it('handles fixed tasks on different days', () => {
+    const fixedTasks = [
+      {
+        id: 'fixed-1',
+        dueWithTime: new Date('2024-01-15T10:00:00').getTime(),
+        timeEstimate: 2 * 60 * 60 * 1000,
+      },
+      {
+        id: 'fixed-2',
+        dueWithTime: new Date('2024-01-16T10:00:00').getTime(),
+        timeEstimate: 3 * 60 * 60 * 1000,
+      },
+    ];
+
+    const result = AutoPlanner.calculateFixedMinutesPerDay(fixedTasks);
+    expect(result['2024-01-15']).toBe(120);
+    expect(result['2024-01-16']).toBe(180);
+  });
+
+  it('ignores tasks without dueWithTime', () => {
+    const fixedTasks = [{
+      id: 'fixed-1',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      // no dueWithTime
+    }];
+
+    const result = AutoPlanner.calculateFixedMinutesPerDay(fixedTasks);
+    expect(result).toEqual({});
+  });
+
+  it('ignores tasks without timeEstimate', () => {
+    const fixedTasks = [{
+      id: 'fixed-1',
+      dueWithTime: new Date('2024-01-15T10:00:00').getTime(),
+      // no timeEstimate
+    }];
+
+    const result = AutoPlanner.calculateFixedMinutesPerDay(fixedTasks);
+    expect(result).toEqual({});
+  });
+});
+
+describe('AutoPlanner.schedule with fixed tasks', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    tagPriorities: {},
+    durationFormula: 'none',
+    oldnessFormula: 'none',
+    workdayStartHour: 9,
+    workdayHours: 6, // 6-hour workday for easier testing
+    skipDays: [0, 6],
+  };
+
+  it('reduces available time on days with fixed tasks', () => {
+    // Create a task that needs 6 hours (fills a whole day normally)
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+    });
+
+    // Fixed task takes 4 hours on Jan 15
+    const fixedTasks = [{
+      id: 'fixed-1',
+      dueWithTime: new Date('2024-01-15T10:00:00').getTime(),
+      timeEstimate: 4 * 60 * 60 * 1000, // 4 hours
+    }];
+
+    const splits = TaskSplitter.splitTask(task, 120, config); // 2-hour blocks = 3 splits
+    const startTime = new Date('2024-01-15T09:00:00'); // Monday
+    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+
+    expect(schedule.length).toBe(3);
+
+    // Jan 15 has only 2 hours available (6 - 4 = 2), so only 1 block fits
+    const jan15Blocks = schedule.filter(s => s.startTime.getDate() === 15);
+    expect(jan15Blocks.length).toBe(1);
+
+    // Remaining 2 blocks should be on Jan 16
+    const jan16Blocks = schedule.filter(s => s.startTime.getDate() === 16);
+    expect(jan16Blocks.length).toBe(2);
+  });
+
+  it('skips days entirely filled by fixed tasks', () => {
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 2 * 60 * 60 * 1000, // 2 hours
+    });
+
+    // Fixed task takes entire 6-hour day on Jan 15
+    const fixedTasks = [{
+      id: 'fixed-1',
+      dueWithTime: new Date('2024-01-15T09:00:00').getTime(),
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+    }];
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    const startTime = new Date('2024-01-15T09:00:00');
+    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+
+    expect(schedule.length).toBe(1);
+    // Should skip Jan 15 entirely and schedule on Jan 16
+    expect(schedule[0].startTime.getDate()).toBe(16);
+  });
+
+  it('handles fixed tasks that exceed workday hours', () => {
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 2 * 60 * 60 * 1000,
+    });
+
+    // Fixed task takes more than available (7 hours > 6 hour workday)
+    const fixedTasks = [{
+      id: 'fixed-1',
+      dueWithTime: new Date('2024-01-15T09:00:00').getTime(),
+      timeEstimate: 7 * 60 * 60 * 1000, // 7 hours
+    }];
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    const startTime = new Date('2024-01-15T09:00:00');
+    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+
+    expect(schedule.length).toBe(1);
+    // Should skip to next day
+    expect(schedule[0].startTime.getDate()).toBe(16);
+  });
+
+  it('works normally when no fixed tasks provided', () => {
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 4 * 60 * 60 * 1000, // 4 hours
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    const startTime = new Date('2024-01-15T09:00:00');
+    
+    // Call with empty fixed tasks array
+    const schedule = AutoPlanner.schedule(splits, config, [], startTime, []);
+
+    expect(schedule.length).toBe(2);
+    // All should be on the same day
+    expect(schedule[0].startTime.getDate()).toBe(15);
+    expect(schedule[1].startTime.getDate()).toBe(15);
+  });
+
+  it('handles multiple days with varying fixed task loads', () => {
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 10 * 60 * 60 * 1000, // 10 hours
+    });
+
+    const fixedTasks = [
+      {
+        id: 'fixed-1',
+        dueWithTime: new Date('2024-01-15T10:00:00').getTime(),
+        timeEstimate: 4 * 60 * 60 * 1000, // 4 hours on Jan 15
+      },
+      {
+        id: 'fixed-2',
+        dueWithTime: new Date('2024-01-16T10:00:00').getTime(),
+        timeEstimate: 2 * 60 * 60 * 1000, // 2 hours on Jan 16
+      },
+    ];
+
+    const splits = TaskSplitter.splitTask(task, 120, config); // 5 blocks of 2 hours
+    const startTime = new Date('2024-01-15T09:00:00');
+    const schedule = AutoPlanner.schedule(splits, config, [], startTime, fixedTasks);
+
+    expect(schedule.length).toBe(5);
+
+    // Jan 15: 6h - 4h fixed = 2h available = 1 block
+    const jan15Blocks = schedule.filter(s => s.startTime.getDate() === 15);
+    expect(jan15Blocks.length).toBe(1);
+
+    // Jan 16: 6h - 2h fixed = 4h available = 2 blocks
+    const jan16Blocks = schedule.filter(s => s.startTime.getDate() === 16);
+    expect(jan16Blocks.length).toBe(2);
+
+    // Jan 17: 6h - 0h fixed = 6h available = remaining 2 blocks
+    const jan17Blocks = schedule.filter(s => s.startTime.getDate() === 17);
+    expect(jan17Blocks.length).toBe(2);
+  });
+});

@@ -248,13 +248,30 @@ async function runAutoplan(dryRun = false) {
     const config = await loadConfig();
 
     // Get all tasks and tags
-    const tasks = await PluginAPI.getTasks();
+    const allTasks = await PluginAPI.getTasks();
     const allTags = await PluginAPI.getAllTags();
 
-    console.log(`[AutoPlan] Processing ${tasks.length} tasks`);
+    console.log(`[AutoPlan] Processing ${allTasks.length} tasks`);
+
+    // Separate fixed tasks (tasks with do-not-reschedule tag)
+    let fixedTasks = [];
+    let schedulableTasks = allTasks;
+    
+    if (config.doNotRescheduleTagId) {
+      fixedTasks = allTasks.filter(t => 
+        !t.isDone && 
+        t.tagIds && 
+        t.tagIds.includes(config.doNotRescheduleTagId)
+      );
+      schedulableTasks = allTasks.filter(t => 
+        !t.tagIds || 
+        !t.tagIds.includes(config.doNotRescheduleTagId)
+      );
+      console.log(`[AutoPlan] ${fixedTasks.length} fixed tasks (will not be rescheduled)`);
+    }
 
     // Filter to only incomplete tasks with time estimates
-    const eligibleTasks = tasks.filter(t => 
+    const eligibleTasks = schedulableTasks.filter(t => 
       !t.isDone && 
       t.timeEstimate && 
       t.timeEstimate > 0
@@ -273,7 +290,8 @@ async function runAutoplan(dryRun = false) {
     console.log(`[AutoPlan] Skipped ${skippedParents.length} parent tasks`);
 
     // Run scheduling algorithm
-    const schedule = AutoPlanner.schedule(splits, config, allTags);
+    // Pass allTasks for building parent hierarchy for base priority calculation
+    const schedule = AutoPlanner.schedule(splits, config, allTags, new Date(), fixedTasks, allTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
 

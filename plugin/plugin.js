@@ -36,6 +36,7 @@ const DEFAULT_CONFIG = {
   workdayStartHour: 9,
   workdayHours: 8,
   skipDays: [0, 6], // Days of week to skip (0 = Sunday, 6 = Saturday)
+  doNotRescheduleTagId: null, // Tag ID for tasks that should not be rescheduled
 };
 
 // ============================================================================
@@ -119,12 +120,27 @@ function escapeRegex(str) {
 
 const PriorityCalculator = {
   /**
-   * Calculate base priority from task order (N+1-r where N is total tasks, r is rank)
+   * Calculate base priority from parent task order (N+1-r where N is total parent tasks, r is rank)
+   * Subtasks inherit their parent's base priority.
+   * 
+   * @param {Object} task - The task to calculate priority for
+   * @param {Array} parentTasks - Array of parent tasks (top-level tasks or tasks with subtasks) in order
+   * @param {Map} parentIdMap - Map of task ID to parent task (for looking up a subtask's parent)
    */
-  calculateBasePriority(task, allTasks) {
-    const totalTasks = allTasks.length;
-    const rank = allTasks.findIndex(t => t.id === task.id) + 1;
-    if (rank === 0) return 0; // Task not found
+  calculateBasePriority(task, parentTasks, parentIdMap = null) {
+    // If this is a subtask and we have a parent map, find the parent's priority
+    if (task.parentId && parentIdMap) {
+      const parent = parentIdMap.get(task.parentId);
+      if (parent) {
+        // Recursively get parent's priority (handles nested subtasks)
+        return this.calculateBasePriority(parent, parentTasks, parentIdMap);
+      }
+    }
+    
+    // For parent tasks (or if no parent found), calculate from position in parentTasks
+    const totalTasks = parentTasks.length;
+    const rank = parentTasks.findIndex(t => t.id === task.id) + 1;
+    if (rank === 0) return 0; // Task not found in parent list
     return totalTasks + 1 - rank;
   },
 
@@ -201,9 +217,16 @@ const PriorityCalculator = {
 
   /**
    * Calculate total urgency/priority for a task
+   * 
+   * @param {Object} task - The task to calculate urgency for
+   * @param {Array} parentTasks - Array of parent tasks in order (for base priority)
+   * @param {Object} config - Configuration object
+   * @param {Array} allTags - All available tags
+   * @param {Date} now - Current time for calculations
+   * @param {Map} parentIdMap - Optional map of task ID to parent task
    */
-  calculateUrgency(task, allTasks, config, allTags, now = new Date()) {
-    const basePriority = this.calculateBasePriority(task, allTasks);
+  calculateUrgency(task, parentTasks, config, allTags, now = new Date(), parentIdMap = null) {
+    const basePriority = this.calculateBasePriority(task, parentTasks, parentIdMap);
     const tagPriority = this.calculateTagPriority(task, config.tagPriorities || {}, allTags);
     const durationPriority = this.calculateDurationPriority(
       task, config.durationFormula || 'linear', config.durationWeight ?? 1.0
@@ -379,10 +402,54 @@ const AutoPlanner = {
   },
 
   /**
+   * Get the date key (YYYY-MM-DD) for a given date
+   */
+  getDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  },
+
+  /**
+   * Calculate fixed task minutes per day from a list of fixed tasks
+   * Fixed tasks are tasks that have the "do not reschedule" tag and have a scheduled time
+   */
+  calculateFixedMinutesPerDay(fixedTasks) {
+    const fixedMinutesPerDay = {};
+    
+    for (const task of fixedTasks) {
+      // Task needs to have a scheduled time (dueWithTime) and a time estimate
+      if (!task.dueWithTime || !task.timeEstimate || task.timeEstimate <= 0) {
+        continue;
+      }
+      
+      const scheduledDate = new Date(task.dueWithTime);
+      const dateKey = this.getDateKey(scheduledDate);
+      
+      // timeEstimate is in milliseconds, convert to minutes
+      const taskMinutes = Math.ceil(task.timeEstimate / 60000);
+      
+      if (!fixedMinutesPerDay[dateKey]) {
+        fixedMinutesPerDay[dateKey] = 0;
+      }
+      fixedMinutesPerDay[dateKey] += taskMinutes;
+    }
+    
+    return fixedMinutesPerDay;
+  },
+
+  /**
    * Main scheduling algorithm
    * Assigns time blocks to the most urgent tasks iteratively
+   * @param {Array} splits - Task splits to schedule
+   * @param {Object} config - Configuration object
+   * @param {Array} allTags - All available tags
+   * @param {Date} startTime - When to start scheduling from
+   * @param {Array} fixedTasks - Tasks that should not be rescheduled (optional)
+   * @param {Array} allTasks - All tasks (for building parent hierarchy) (optional)
    */
-  schedule(splits, config, allTags, startTime = new Date()) {
+  schedule(splits, config, allTags, startTime = new Date(), fixedTasks = [], allTasks = []) {
     if (splits.length === 0) return [];
 
     const schedule = [];
@@ -390,17 +457,54 @@ const AutoPlanner = {
     let simulatedTime = new Date(startTime);
     
     const workdayStartHour = config.workdayStartHour ?? 9;
-    const maxMinutesPerDay = (config.workdayHours ?? 8) * 60;
+    const baseMaxMinutesPerDay = (config.workdayHours ?? 8) * 60;
     const maxDaysAhead = config.maxDaysAhead ?? 30;
     const skipDays = config.skipDays ?? [];
     
+    // Calculate fixed task minutes per day
+    const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks);
+    
+    // Build parent task hierarchy
+    // Parent tasks are: tasks that have subtasks OR top-level tasks (no parentId)
+    const taskMap = new Map();
+    const parentIds = new Set();
+    for (const task of allTasks) {
+      taskMap.set(task.id, task);
+      if (task.parentId) {
+        parentIds.add(task.parentId);
+      }
+    }
+    
+    // Get parent tasks in order (tasks that are parents OR top-level non-done tasks)
+    // A "parent task" for priority purposes is either:
+    // 1. A task that has subtasks (is in parentIds)
+    // 2. A top-level task (no parentId) that doesn't have subtasks
+    const parentTasks = allTasks.filter(task => {
+      // Skip done tasks
+      if (task.isDone) return false;
+      // Include if it's a parent (has subtasks)
+      if (parentIds.has(task.id)) return true;
+      // Include if it's top-level (no parent)
+      if (!task.parentId) return true;
+      return false;
+    });
+    
+    // Helper to get available minutes for a specific day
+    const getAvailableMinutesForDay = (date) => {
+      const dateKey = this.getDateKey(date);
+      const fixedMinutes = fixedMinutesPerDay[dateKey] || 0;
+      return Math.max(0, baseMaxMinutesPerDay - fixedMinutes);
+    };
+    
     // Start from current time if during work hours
     let currentDayMinutes = this.getCurrentDayMinutes(simulatedTime, workdayStartHour);
+    let maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
     
     // If we're past work hours or current day minutes exceeds max, move to next workday
-    if (currentDayMinutes >= maxMinutesPerDay) {
+    if (currentDayMinutes >= maxMinutesForCurrentDay) {
       simulatedTime = this.advanceToNextWorkday(simulatedTime, skipDays, workdayStartHour);
       currentDayMinutes = 0;
+      maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
     } else if (this.shouldSkipDay(simulatedTime, skipDays)) {
       // If starting on a skip day, find the next valid workday
       // We use a temp date set to previous day so advanceToNextWorkday lands on correct day
@@ -408,23 +512,15 @@ const AutoPlanner = {
       tempDate.setDate(tempDate.getDate() - 1);
       simulatedTime = this.advanceToNextWorkday(tempDate, skipDays, workdayStartHour);
       currentDayMinutes = 0;
+      maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
     }
     
     const startDate = new Date(simulatedTime);
     let daysScheduled = 0;
 
     while (remainingSplits.length > 0 && daysScheduled < maxDaysAhead) {
-      // Get unique original task IDs in their original order (for base priority calculation)
-      const originalTaskOrder = [];
-      const seenTaskIds = new Set();
-      for (const split of remainingSplits) {
-        if (!seenTaskIds.has(split.originalTaskId)) {
-          seenTaskIds.add(split.originalTaskId);
-          originalTaskOrder.push(split.originalTask);
-        }
-      }
-
       // Calculate urgency for all remaining splits
+      // Base priority comes from parent tasks order, subtasks inherit from parents
       const splitsWithUrgency = remainingSplits.map((split, index) => {
         // Calculate total remaining time for all unscheduled splits of the same original task
         const remainingSplitsForTask = remainingSplits.filter(
@@ -445,10 +541,11 @@ const AutoPlanner = {
 
         const urgency = PriorityCalculator.calculateUrgency(
           pseudoTask, 
-          originalTaskOrder, // Pass original tasks for base priority calculation
+          parentTasks, // Use parent tasks for base priority calculation
           config,
           allTags,
-          simulatedTime
+          simulatedTime,
+          taskMap // Pass task map for parent lookup
         );
 
         return {
@@ -467,13 +564,26 @@ const AutoPlanner = {
       const blockMinutes = mostUrgent.split.estimatedHours * 60;
 
       // Check if we need to move to next day
-      if (currentDayMinutes + blockMinutes > maxMinutesPerDay) {
+      if (currentDayMinutes + blockMinutes > maxMinutesForCurrentDay) {
         simulatedTime = this.advanceToNextWorkday(simulatedTime, skipDays, workdayStartHour);
         currentDayMinutes = 0;
+        maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
         daysScheduled = daysBetween(startDate, simulatedTime);
         
         if (daysScheduled >= maxDaysAhead) {
           break; // Stop scheduling if we've exceeded max days
+        }
+        
+        // If the new day has no available time (entirely filled by fixed tasks), skip it
+        // Keep advancing until we find a day with available time or exceed maxDaysAhead
+        while (maxMinutesForCurrentDay < blockMinutes && daysScheduled < maxDaysAhead) {
+          simulatedTime = this.advanceToNextWorkday(simulatedTime, skipDays, workdayStartHour);
+          maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
+          daysScheduled = daysBetween(startDate, simulatedTime);
+        }
+        
+        if (daysScheduled >= maxDaysAhead) {
+          break;
         }
       }
 
@@ -893,13 +1003,30 @@ async function runAutoplan(dryRun = false) {
     const config = await loadConfig();
 
     // Get all tasks and tags
-    const tasks = await PluginAPI.getTasks();
+    const allTasks = await PluginAPI.getTasks();
     const allTags = await PluginAPI.getAllTags();
 
-    console.log(`[AutoPlan] Processing ${tasks.length} tasks`);
+    console.log(`[AutoPlan] Processing ${allTasks.length} tasks`);
+
+    // Separate fixed tasks (tasks with do-not-reschedule tag)
+    let fixedTasks = [];
+    let schedulableTasks = allTasks;
+    
+    if (config.doNotRescheduleTagId) {
+      fixedTasks = allTasks.filter(t => 
+        !t.isDone && 
+        t.tagIds && 
+        t.tagIds.includes(config.doNotRescheduleTagId)
+      );
+      schedulableTasks = allTasks.filter(t => 
+        !t.tagIds || 
+        !t.tagIds.includes(config.doNotRescheduleTagId)
+      );
+      console.log(`[AutoPlan] ${fixedTasks.length} fixed tasks (will not be rescheduled)`);
+    }
 
     // Filter to only incomplete tasks with time estimates
-    const eligibleTasks = tasks.filter(t => 
+    const eligibleTasks = schedulableTasks.filter(t => 
       !t.isDone && 
       t.timeEstimate && 
       t.timeEstimate > 0
@@ -918,7 +1045,8 @@ async function runAutoplan(dryRun = false) {
     console.log(`[AutoPlan] Skipped ${skippedParents.length} parent tasks`);
 
     // Run scheduling algorithm
-    const schedule = AutoPlanner.schedule(splits, config, allTags);
+    // Pass allTasks for building parent hierarchy for base priority calculation
+    const schedule = AutoPlanner.schedule(splits, config, allTags, new Date(), fixedTasks, allTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
 
