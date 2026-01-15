@@ -570,11 +570,13 @@
       </table>
 
       <div class="add-tag-row">
-        <input type="text" id="newTagName" placeholder="Enter tag name (must match exactly)">
+        <select id="newTagName">
+          <option value="">Select a tag...</option>
+        </select>
         <input type="number" id="newTagPriority" placeholder="Boost" value="10" style="width: 80px;">
         <button class="btn btn-small" onclick="addTagPriority()">Add Tag</button>
       </div>
-      <p class="help-text">Tag names must match exactly as they appear in Super Productivity (case-sensitive).</p>
+      <p class="help-text">Select a tag from the dropdown to add a priority boost.</p>
     </div>
 
   </div>
@@ -607,11 +609,13 @@
       </table>
 
       <div class="add-tag-row">
-        <input type="text" id="newProjectName" placeholder="Enter project name (must match exactly)">
+        <select id="newProjectName">
+          <option value="">Select a project...</option>
+        </select>
         <input type="number" id="newProjectPriority" placeholder="Boost" value="10" style="width: 80px;">
         <button class="btn btn-small" onclick="addProjectPriority()">Add Project</button>
       </div>
-      <p class="help-text">Project names must match exactly as they appear in Super Productivity (case-sensitive). Use the project title, not ID.</p>
+      <p class="help-text">Select a project from the dropdown to add a priority boost.</p>
     </div>
 
   </div>
@@ -793,6 +797,8 @@
   <script>
     // State
     let currentConfig = {};
+    let availableTags = [];
+    let availableProjects = [];
 
     // Handle Run AutoPlan button click
     async function handleRunAutoplan() {
@@ -855,8 +861,9 @@
         } else {
           currentConfig = getDefaultConfig();
         }
-        // Populate tag dropdown before applying settings
+        // Populate dropdowns before applying settings
         await populateTagDropdown();
+        await populateProjectDropdown();
         applySettingsToUI();
       } catch (e) {
         console.error('Failed to load settings:', e);
@@ -865,31 +872,84 @@
       }
     }
 
-    // Populate the "Do Not Reschedule" tag dropdown with available tags
+    // Populate tag dropdowns with available tags
     async function populateTagDropdown() {
       try {
-        const tags = await PluginAPI.getAllTags();
-        const select = document.getElementById('doNotRescheduleTag');
+        availableTags = await PluginAPI.getAllTags();
+        
+        // Populate "Do Not Reschedule" dropdown
+        const doNotRescheduleSelect = document.getElementById('doNotRescheduleTag');
         
         // Clear existing options except the first one (None)
-        while (select.options.length > 1) {
-          select.remove(1);
+        while (doNotRescheduleSelect.options.length > 1) {
+          doNotRescheduleSelect.remove(1);
         }
         
         // Add tags as options
-        for (const tag of tags) {
+        for (const tag of availableTags) {
           const option = document.createElement('option');
           option.value = tag.id;
           option.textContent = tag.title;
-          select.appendChild(option);
+          doNotRescheduleSelect.appendChild(option);
         }
         
         // Re-apply the selected value if we have one
         if (currentConfig.doNotRescheduleTagId) {
-          select.value = currentConfig.doNotRescheduleTagId;
+          doNotRescheduleSelect.value = currentConfig.doNotRescheduleTagId;
         }
+        
+        // Also populate the tag priority dropdown
+        updateTagPriorityDropdown();
       } catch (e) {
         console.error('Failed to load tags:', e);
+      }
+    }
+
+    // Update the tag priority dropdown with available tags (excluding already added ones)
+    function updateTagPriorityDropdown() {
+      const select = document.getElementById('newTagName');
+      const configuredTags = Object.keys(currentConfig.tagPriorities || {});
+      
+      // Clear existing options
+      select.innerHTML = '<option value="">Select a tag...</option>';
+      
+      // Add available tags that aren't already configured
+      for (const tag of availableTags) {
+        if (!configuredTags.includes(tag.title)) {
+          const option = document.createElement('option');
+          option.value = tag.title;
+          option.textContent = tag.title;
+          select.appendChild(option);
+        }
+      }
+    }
+
+    // Populate project dropdown with available projects
+    async function populateProjectDropdown() {
+      try {
+        availableProjects = await PluginAPI.getAllProjects();
+        updateProjectPriorityDropdown();
+      } catch (e) {
+        console.error('Failed to load projects:', e);
+      }
+    }
+
+    // Update the project priority dropdown with available projects (excluding already added ones)
+    function updateProjectPriorityDropdown() {
+      const select = document.getElementById('newProjectName');
+      const configuredProjects = Object.keys(currentConfig.projectPriorities || {});
+      
+      // Clear existing options
+      select.innerHTML = '<option value="">Select a project...</option>';
+      
+      // Add available projects that aren't already configured
+      for (const project of availableProjects) {
+        if (!configuredProjects.includes(project.title)) {
+          const option = document.createElement('option');
+          option.value = project.title;
+          option.textContent = project.title;
+          select.appendChild(option);
+        }
       }
     }
 
@@ -1027,14 +1087,14 @@
     }
 
     function addTagPriority() {
-      const nameInput = document.getElementById('newTagName');
+      const nameSelect = document.getElementById('newTagName');
       const priorityInput = document.getElementById('newTagPriority');
       
-      const name = nameInput.value.trim();
+      const name = nameSelect.value;
       const priority = parseFloat(priorityInput.value) || 0;
       
       if (!name) {
-        showStatus('Please enter a tag name', 'error');
+        showStatus('Please select a tag', 'error');
         return;
       }
 
@@ -1044,8 +1104,8 @@
       
       currentConfig.tagPriorities[name] = priority;
       updateTagTable();
+      updateTagPriorityDropdown();
       
-      nameInput.value = '';
       priorityInput.value = '10';
     }
 
@@ -1056,6 +1116,7 @@
     function removeTagPriority(name) {
       delete currentConfig.tagPriorities[name];
       updateTagTable();
+      updateTagPriorityDropdown();
     }
 
     // Project priority management
@@ -1088,14 +1149,14 @@
     }
 
     function addProjectPriority() {
-      const nameInput = document.getElementById('newProjectName');
+      const nameSelect = document.getElementById('newProjectName');
       const priorityInput = document.getElementById('newProjectPriority');
       
-      const name = nameInput.value.trim();
+      const name = nameSelect.value;
       const priority = parseFloat(priorityInput.value) || 0;
       
       if (!name) {
-        showStatus('Please enter a project name', 'error');
+        showStatus('Please select a project', 'error');
         return;
       }
 
@@ -1105,8 +1166,8 @@
       
       currentConfig.projectPriorities[name] = priority;
       updateProjectTable();
+      updateProjectPriorityDropdown();
       
-      nameInput.value = '';
       priorityInput.value = '10';
     }
 
@@ -1117,6 +1178,7 @@
     function removeProjectPriority(name) {
       delete currentConfig.projectPriorities[name];
       updateProjectTable();
+      updateProjectPriorityDropdown();
     }
 
 
