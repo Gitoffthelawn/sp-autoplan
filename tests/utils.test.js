@@ -10,6 +10,8 @@ import {
   getTaskAgeInDays,
   getEstimatedHours,
   getRemainingHours,
+  getTaskDueDate,
+  parseDeadlineFromNotes,
   escapeRegex,
 } from '../src/core.js';
 
@@ -171,5 +173,103 @@ describe('escapeRegex', () => {
 
   it('handles strings without special characters', () => {
     expect(escapeRegex('hello world')).toBe('hello world');
+  });
+});
+
+describe('getTaskDueDate', () => {
+  it('returns null when only dueWithTime is set (not used for deadlines)', () => {
+    const timestamp = new Date('2024-01-20T15:00:00').getTime();
+    const task = { dueWithTime: timestamp };
+    // dueWithTime is used for scheduling, not deadlines
+    expect(getTaskDueDate(task)).toBe(null);
+  });
+
+  it('returns Date from dueDate field', () => {
+    const timestamp = new Date('2024-01-20').getTime();
+    const task = { dueDate: timestamp };
+    const result = getTaskDueDate(task);
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getTime()).toBe(timestamp);
+  });
+
+  it('prefers notes deadline over dueDate', () => {
+    const dueDate = new Date('2024-01-21').getTime();
+    const task = { dueDate, notes: 'Due: 2024-01-20' };
+    const result = getTaskDueDate(task);
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getFullYear()).toBe(2024);
+    expect(result.getMonth()).toBe(0); // January
+    expect(result.getDate()).toBe(20);
+  });
+
+  it('returns null when no due date is set', () => {
+    const task = { title: 'Test Task' };
+    expect(getTaskDueDate(task)).toBe(null);
+  });
+
+  it('returns null for task with undefined dueDate', () => {
+    const task = { dueDate: undefined };
+    expect(getTaskDueDate(task)).toBe(null);
+  });
+});
+
+describe('parseDeadlineFromNotes', () => {
+  it('parses ISO format deadline', () => {
+    const notes = 'Some task notes\nDue: 2024-01-20\nMore notes';
+    const result = parseDeadlineFromNotes(notes);
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getFullYear()).toBe(2024);
+    expect(result.getMonth()).toBe(0);
+    expect(result.getDate()).toBe(20);
+  });
+
+  it('parses deadline with lowercase "due"', () => {
+    const notes = 'due: 2024-06-15';
+    const result = parseDeadlineFromNotes(notes);
+    expect(result.getMonth()).toBe(5); // June
+    expect(result.getDate()).toBe(15);
+  });
+
+  it('parses "Deadline:" prefix', () => {
+    const notes = 'Deadline: 2024-03-10';
+    const result = parseDeadlineFromNotes(notes);
+    expect(result.getMonth()).toBe(2); // March
+    expect(result.getDate()).toBe(10);
+  });
+
+  it('parses named month format', () => {
+    const notes = 'Due: Jan 20, 2024';
+    const result = parseDeadlineFromNotes(notes);
+    expect(result.getFullYear()).toBe(2024);
+    expect(result.getMonth()).toBe(0);
+    expect(result.getDate()).toBe(20);
+  });
+
+  it('parses MM/DD/YYYY format', () => {
+    const notes = 'Due: 01/20/2024';
+    const result = parseDeadlineFromNotes(notes);
+    expect(result.getMonth()).toBe(0);
+    expect(result.getDate()).toBe(20);
+  });
+
+  it('parses DD/MM/YYYY format when day > 12', () => {
+    const notes = 'Due: 20/01/2024';
+    const result = parseDeadlineFromNotes(notes);
+    expect(result.getMonth()).toBe(0);
+    expect(result.getDate()).toBe(20);
+  });
+
+  it('returns null for notes without deadline', () => {
+    const notes = 'Just some regular notes here';
+    expect(parseDeadlineFromNotes(notes)).toBe(null);
+  });
+
+  it('returns null for null/undefined notes', () => {
+    expect(parseDeadlineFromNotes(null)).toBe(null);
+    expect(parseDeadlineFromNotes(undefined)).toBe(null);
+  });
+
+  it('returns null for empty notes', () => {
+    expect(parseDeadlineFromNotes('')).toBe(null);
   });
 });
