@@ -51,6 +51,8 @@ Use the **Schedule** tab to preview what will be scheduled before applying chang
 
 ## Important Caveats
 
+**Super Productivity does not distinguish between due date and planned date.** Currently, there's no workaround for this.
+
 **Super Productivity has no priority field.** AutoPlan rebuilds urgency using tags, projects, task elderliness, and estimated completion time. Use the dry-run preview to verify the schedule matches your expectations.
 
 **Super Productivity doesn't support scheduling tasks only partially.** AutoPlan splits large tasks into `Task <I>`, `Task <II>`, etc. This means:
