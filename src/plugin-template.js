@@ -76,7 +76,8 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
                   item.split.splitIndex,
                   item.split.totalSplits,
                   originalTask.title,
-                  originalId
+                  originalId,
+                  originalTask.notes
                 ),
                 ...schedulingFields,
               });
@@ -103,7 +104,8 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
                   item.split.splitIndex,
                   item.split.totalSplits,
                   originalTask.title,
-                  originalId
+                  originalId,
+                  originalTask.notes
                 ),
               });
 

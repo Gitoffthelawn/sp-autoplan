@@ -1197,11 +1197,27 @@ const TaskMerger = {
   },
 
   /**
-   * Generate the notes content for a split task
+   * Generate the notes content for a split task, preserving existing user notes
+   * @param {number} splitIndex - Zero-based index of this split
+   * @param {number} totalSplits - Total number of splits
+   * @param {string} originalTitle - The original task title
+   * @param {string} originalTaskId - The original task ID
+   * @param {string} [existingNotes=''] - Existing notes to preserve (optional)
+   * @returns {string} Combined notes with AutoPlan markers and preserved user notes
    */
-  generateSplitNotes(splitIndex, totalSplits, originalTitle, originalTaskId) {
+  generateSplitNotes(splitIndex, totalSplits, originalTitle, originalTaskId, existingNotes = '') {
     const escapedTitle = this.escapeTitle(originalTitle);
-    return `[AutoPlan] Split ${splitIndex + 1}/${totalSplits} of "${escapedTitle}"\n\n[AutoPlan] Original Task ID: ${originalTaskId}`;
+    const autoplanMarker = `[AutoPlan] Split ${splitIndex + 1}/${totalSplits} of "${escapedTitle}"\n\n[AutoPlan] Original Task ID: ${originalTaskId}`;
+    
+    // Clean any existing AutoPlan markers from the notes to avoid duplication
+    const cleanedUserNotes = this.cleanAutoplanNotes(existingNotes);
+    
+    if (cleanedUserNotes) {
+      // Put user notes first, then AutoPlan markers
+      return `${cleanedUserNotes}\n\n${autoplanMarker}`;
+    }
+    
+    return autoplanMarker;
   },
 
   /**
@@ -1401,7 +1417,8 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
                   item.split.splitIndex,
                   item.split.totalSplits,
                   originalTask.title,
-                  originalId
+                  originalId,
+                  originalTask.notes
                 ),
                 ...schedulingFields,
               });
@@ -1428,7 +1445,8 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
                   item.split.splitIndex,
                   item.split.totalSplits,
                   originalTask.title,
-                  originalId
+                  originalId,
+                  originalTask.notes
                 ),
               });
 

@@ -93,6 +93,46 @@ describe('TaskMerger.generateSplitNotes', () => {
     expect(notes).toContain('Task \\"with quotes\\"');
     expect(notes).toContain('[AutoPlan]');
   });
+
+  it('preserves existing user notes', () => {
+    const existingNotes = 'Deadline: 2024-06-15\nImportant context here';
+    const notes = TaskMerger.generateSplitNotes(0, 2, 'My Task', 'orig-1', existingNotes);
+    expect(notes).toContain('Deadline: 2024-06-15');
+    expect(notes).toContain('Important context here');
+    expect(notes).toContain('[AutoPlan] Split 1/2');
+    expect(notes).toContain('[AutoPlan] Original Task ID: orig-1');
+  });
+
+  it('puts user notes before AutoPlan markers', () => {
+    const existingNotes = 'User note';
+    const notes = TaskMerger.generateSplitNotes(0, 2, 'My Task', 'orig-1', existingNotes);
+    const userNoteIndex = notes.indexOf('User note');
+    const autoplanIndex = notes.indexOf('[AutoPlan]');
+    expect(userNoteIndex).toBeLessThan(autoplanIndex);
+  });
+
+  it('cleans existing AutoPlan markers from notes to avoid duplication', () => {
+    const existingNotes = 'User note\n\n[AutoPlan] Split 1/2 of "Old Task"\n\n[AutoPlan] Original Task ID: old-id';
+    const notes = TaskMerger.generateSplitNotes(1, 3, 'New Task', 'new-id', existingNotes);
+    expect(notes).toContain('User note');
+    expect(notes).toContain('[AutoPlan] Split 2/3 of "New Task"');
+    expect(notes).toContain('[AutoPlan] Original Task ID: new-id');
+    // Should not contain old markers
+    expect(notes).not.toContain('Split 1/2');
+    expect(notes).not.toContain('old-id');
+  });
+
+  it('handles empty existing notes', () => {
+    const notes = TaskMerger.generateSplitNotes(0, 2, 'My Task', 'orig-1', '');
+    expect(notes).toBe('[AutoPlan] Split 1/2 of "My Task"\n\n[AutoPlan] Original Task ID: orig-1');
+  });
+
+  it('handles null/undefined existing notes', () => {
+    const notesNull = TaskMerger.generateSplitNotes(0, 2, 'My Task', 'orig-1', null);
+    const notesUndef = TaskMerger.generateSplitNotes(0, 2, 'My Task', 'orig-1', undefined);
+    expect(notesNull).toBe('[AutoPlan] Split 1/2 of "My Task"\n\n[AutoPlan] Original Task ID: orig-1');
+    expect(notesUndef).toBe('[AutoPlan] Split 1/2 of "My Task"\n\n[AutoPlan] Original Task ID: orig-1');
+  });
 });
 
 describe('TaskMerger.parseSplitInfo', () => {
