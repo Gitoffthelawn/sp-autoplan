@@ -152,46 +152,133 @@ describe('TaskMerger.findRelatedSplits', () => {
 });
 
 describe('TaskMerger.calculateMergeData', () => {
-  it('calculates total time from incomplete splits', () => {
-    const splits = [
+  it('calculates total time from incomplete splits for estimate, all splits for spent', () => {
+    const incompleteSplits = [
       createTask({ timeEstimate: 2 * 60 * 60 * 1000, timeSpent: 30 * 60 * 1000 }),
       createTask({ timeEstimate: 2 * 60 * 60 * 1000, timeSpent: 60 * 60 * 1000 }),
     ];
+    const completedSplits = [
+      createTask({ timeEstimate: 2 * 60 * 60 * 1000, timeSpent: 2 * 60 * 60 * 1000, isDone: true }),
+    ];
+    const allSplits = [...incompleteSplits, ...completedSplits];
 
-    const data = TaskMerger.calculateMergeData(splits, 'Original Task');
+    const data = TaskMerger.calculateMergeData(incompleteSplits, allSplits, 'Original Task');
 
+    // Estimate only from incomplete splits
     expect(data.totalTimeEstimate).toBe(4 * 60 * 60 * 1000);
-    expect(data.totalTimeSpent).toBe(90 * 60 * 1000);
+    // Time spent from ALL splits (including completed)
+    expect(data.totalTimeSpent).toBe(3.5 * 60 * 60 * 1000); // 30min + 60min + 120min
     expect(data.mergedCount).toBe(2);
   });
 
   it('uses provided original title', () => {
     const splits = [createTask({ title: 'Task <I>' })];
-    const data = TaskMerger.calculateMergeData(splits, 'My Original Task');
+    const data = TaskMerger.calculateMergeData(splits, splits, 'My Original Task');
 
     expect(data.title).toBe('My Original Task');
   });
 
   it('removes Roman numeral suffix when no original title', () => {
     const splits = [createTask({ title: 'Task Name <III>' })];
-    const data = TaskMerger.calculateMergeData(splits, null);
+    const data = TaskMerger.calculateMergeData(splits, splits, null);
 
     expect(data.title).toBe('Task Name');
   });
 
   it('handles single split', () => {
     const splits = [createTask({ timeEstimate: 2 * 60 * 60 * 1000 })];
-    const data = TaskMerger.calculateMergeData(splits, 'Task');
+    const data = TaskMerger.calculateMergeData(splits, splits, 'Task');
 
     expect(data.mergedCount).toBe(1);
   });
 
   it('handles empty array', () => {
-    const data = TaskMerger.calculateMergeData([], 'Task');
+    const data = TaskMerger.calculateMergeData([], [], 'Task');
 
     expect(data.totalTimeEstimate).toBe(0);
     expect(data.totalTimeSpent).toBe(0);
     expect(data.mergedCount).toBe(0);
+  });
+
+  it('includes time spent from completed splits only', () => {
+    const incompleteSplits = [];
+    const completedSplits = [
+      createTask({ timeEstimate: 2 * 60 * 60 * 1000, timeSpent: 2 * 60 * 60 * 1000, isDone: true }),
+    ];
+
+    const data = TaskMerger.calculateMergeData(incompleteSplits, completedSplits, 'Task');
+
+    expect(data.totalTimeEstimate).toBe(0); // No incomplete splits
+    expect(data.totalTimeSpent).toBe(2 * 60 * 60 * 1000); // From completed split
+    expect(data.mergedCount).toBe(0);
+  });
+
+  it('merges timeSpentOnDay from all splits', () => {
+    const split1 = createTask({ 
+      timeEstimate: 2 * 60 * 60 * 1000, 
+      timeSpentOnDay: { '2024-01-15': 30 * 60 * 1000, '2024-01-16': 60 * 60 * 1000 }
+    });
+    const split2 = createTask({ 
+      timeEstimate: 2 * 60 * 60 * 1000, 
+      timeSpentOnDay: { '2024-01-16': 30 * 60 * 1000, '2024-01-17': 45 * 60 * 1000 }
+    });
+    const allSplits = [split1, split2];
+
+    const data = TaskMerger.calculateMergeData(allSplits, allSplits, 'Task');
+
+    expect(data.totalTimeSpentOnDay).toEqual({
+      '2024-01-15': 30 * 60 * 1000,
+      '2024-01-16': 90 * 60 * 1000, // 60 + 30
+      '2024-01-17': 45 * 60 * 1000,
+    });
+  });
+
+  it('handles splits with empty or missing timeSpentOnDay', () => {
+    const split1 = createTask({ timeEstimate: 2 * 60 * 60 * 1000, timeSpentOnDay: { '2024-01-15': 30 * 60 * 1000 } });
+    const split2 = createTask({ timeEstimate: 2 * 60 * 60 * 1000, timeSpentOnDay: {} });
+    const split3 = createTask({ timeEstimate: 2 * 60 * 60 * 1000 }); // no timeSpentOnDay
+    const allSplits = [split1, split2, split3];
+
+    const data = TaskMerger.calculateMergeData(allSplits, allSplits, 'Task');
+
+    expect(data.totalTimeSpentOnDay).toEqual({
+      '2024-01-15': 30 * 60 * 1000,
+    });
+  });
+});
+
+describe('TaskMerger.mergeTimeSpentOnDay', () => {
+  it('merges multiple timeSpentOnDay objects', () => {
+    const result = TaskMerger.mergeTimeSpentOnDay([
+      { '2024-01-15': 1000, '2024-01-16': 2000 },
+      { '2024-01-16': 500, '2024-01-17': 3000 },
+    ]);
+
+    expect(result).toEqual({
+      '2024-01-15': 1000,
+      '2024-01-16': 2500,
+      '2024-01-17': 3000,
+    });
+  });
+
+  it('handles empty array', () => {
+    const result = TaskMerger.mergeTimeSpentOnDay([]);
+    expect(result).toEqual({});
+  });
+
+  it('handles null and undefined entries', () => {
+    const result = TaskMerger.mergeTimeSpentOnDay([
+      null,
+      undefined,
+      { '2024-01-15': 1000 },
+    ]);
+
+    expect(result).toEqual({ '2024-01-15': 1000 });
+  });
+
+  it('handles empty objects', () => {
+    const result = TaskMerger.mergeTimeSpentOnDay([{}, {}, { '2024-01-15': 500 }]);
+    expect(result).toEqual({ '2024-01-15': 500 });
   });
 });
 

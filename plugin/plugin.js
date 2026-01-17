@@ -442,6 +442,10 @@ const TaskSplitter = {
         splitName = `${splitName} <${toRoman(i + 1)}>`;
       }
 
+      // First split inherits timeSpent and timeSpentOnDay from original task, others start empty
+      const timeSpentMs = i === 0 ? (task.timeSpent || 0) : 0;
+      const timeSpentOnDay = i === 0 ? (task.timeSpentOnDay || {}) : {};
+      
       splits.push({
         originalTaskId: task.id,
         originalTask: task,
@@ -450,6 +454,8 @@ const TaskSplitter = {
         title: splitName,
         estimatedHours: blockHours,
         estimatedMs: blockHours * 60 * 60 * 1000,
+        timeSpentMs: timeSpentMs,
+        timeSpentOnDay: timeSpentOnDay,
         tagIds: task.tagIds || [],
         projectId: task.projectId,
         parentId: task.parentId,
@@ -1054,16 +1060,46 @@ const TaskMerger = {
   },
 
   /**
-   * Calculate merged task data from splits
+   * Merge multiple timeSpentOnDay objects into one
+   * Each timeSpentOnDay is an object like { "2024-01-15": 3600000, "2024-01-16": 1800000 }
+   * @param {Array} timeSpentOnDayObjects - Array of timeSpentOnDay objects to merge
+   * @returns {Object} Combined timeSpentOnDay with summed values for each day
    */
-  calculateMergeData(incompleteSplits, originalTitle) {
+  mergeTimeSpentOnDay(timeSpentOnDayObjects) {
+    const merged = {};
+    for (const timeSpentOnDay of timeSpentOnDayObjects) {
+      if (!timeSpentOnDay || typeof timeSpentOnDay !== 'object') continue;
+      for (const [day, ms] of Object.entries(timeSpentOnDay)) {
+        merged[day] = (merged[day] || 0) + (ms || 0);
+      }
+    }
+    return merged;
+  },
+
+  /**
+   * Calculate merged task data from splits
+   * @param {Array} incompleteSplits - Splits that are not done (for time estimate)
+   * @param {Array} allSplits - All splits including completed ones (for time spent)
+   * @param {string} originalTitle - The original task title
+   */
+  calculateMergeData(incompleteSplits, allSplits, originalTitle) {
     let totalTimeEstimate = 0;
     let totalTimeSpent = 0;
     
+    // Sum time estimates from incomplete splits only (remaining work)
     for (const split of incompleteSplits) {
       totalTimeEstimate += split.timeEstimate || 0;
+    }
+    
+    // Sum time spent from ALL splits including completed ones
+    for (const split of allSplits) {
       totalTimeSpent += split.timeSpent || 0;
     }
+    
+    // Merge timeSpentOnDay from ALL splits
+    const mergedTimeSpentOnDay = this.mergeTimeSpentOnDay(
+      allSplits.map(s => s.timeSpentOnDay)
+    );
 
     // Clean title by removing Roman numeral suffix in <> brackets
     // Pattern: " <I>", " <II>", " <XIV>", etc.
@@ -1073,6 +1109,7 @@ const TaskMerger = {
       title: cleanTitle,
       totalTimeEstimate,
       totalTimeSpent,
+      totalTimeSpentOnDay: mergedTimeSpentOnDay,
       mergedCount: incompleteSplits.length,
     };
   },
@@ -1166,51 +1203,68 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
         scheduledAt: items[0].startTime,
       });
     } else {
-      // Create split tasks
+      // Split task into multiple blocks
+      // IMPORTANT: Preserve the original task as the first split to maintain task ID
       const splitTaskIds = [];
       
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        
-        // Create new task for this split
-        const newTaskId = await PluginAPI.addTask({
-          title: item.split.title,
-          timeEstimate: item.split.estimatedMs,
-          tagIds: item.split.tagIds,
-          projectId: item.split.projectId,
-          parentId: item.split.parentId,
-          notes: TaskMerger.generateSplitNotes(
-            item.split.splitIndex,
-            item.split.totalSplits,
-            originalTask.title,
-            originalId
-          ),
-        });
-
-        // Set the scheduled time via updateTask using appropriate field
         const schedulingFields = getSchedulingFields(item.startTime);
-        await PluginAPI.updateTask(newTaskId, schedulingFields);
+        
+        if (i === 0) {
+          // First split: UPDATE the original task instead of creating a new one
+          // This preserves the original task ID and keeps the timeSpent
+          await PluginAPI.updateTask(originalId, {
+            title: item.split.title,
+            timeEstimate: item.split.estimatedMs,
+            // timeSpent is preserved automatically since we're updating, not creating
+            notes: TaskMerger.generateSplitNotes(
+              item.split.splitIndex,
+              item.split.totalSplits,
+              originalTask.title,
+              originalId
+            ),
+            ...schedulingFields,
+          });
 
-        splitTaskIds.push(newTaskId);
-        createdTasks.push({
-          type: 'created',
-          taskId: newTaskId,
-          originalTaskId: originalId,
-          splitIndex: item.split.splitIndex,
-          scheduledAt: item.startTime,
-        });
-      }
+          splitTaskIds.push(originalId);
+          createdTasks.push({
+            type: 'updated',
+            taskId: originalId,
+            originalTaskId: originalId,
+            splitIndex: item.split.splitIndex,
+            scheduledAt: item.startTime,
+          });
+        } else {
+          // Subsequent splits: Create new tasks with no time tracking data
+          const newTaskId = await PluginAPI.addTask({
+            title: item.split.title,
+            timeEstimate: item.split.estimatedMs,
+            timeSpent: 0, // New splits start with no time spent
+            timeSpentOnDay: {}, // New splits start with empty time-on-day tracking
+            tagIds: item.split.tagIds,
+            projectId: item.split.projectId,
+            parentId: item.split.parentId,
+            notes: TaskMerger.generateSplitNotes(
+              item.split.splitIndex,
+              item.split.totalSplits,
+              originalTask.title,
+              originalId
+            ),
+          });
 
-      // Delete the original task since it's now been split
-      try {
-        await PluginAPI.deleteTask(originalId);
-      } catch (e) {
-        console.warn('[AutoPlan] Could not delete original task:', e);
-        // Fallback: mark as done and add note
-        await PluginAPI.updateTask(originalId, {
-          isDone: true,
-          notes: `${originalTask.notes || ''}\n\n[AutoPlan] This task was split into ${items.length} blocks.`,
-        });
+          // Set the scheduled time via updateTask using appropriate field
+          await PluginAPI.updateTask(newTaskId, schedulingFields);
+
+          splitTaskIds.push(newTaskId);
+          createdTasks.push({
+            type: 'created',
+            taskId: newTaskId,
+            originalTaskId: originalId,
+            splitIndex: item.split.splitIndex,
+            scheduledAt: item.startTime,
+          });
+        }
       }
     }
   }
@@ -1270,18 +1324,29 @@ TaskMerger.mergeSplits = async function(taskId, silent = false) {
     return null;
   }
 
-  // Calculate merge data
-  const mergeData = this.calculateMergeData(incompleteSplits, originalTitle);
+  // Calculate merge data - pass all splits to include time spent from completed ones
+  const mergeData = this.calculateMergeData(incompleteSplits, splits, originalTitle);
 
-  // Use the first incomplete split as the merged task
-  const mergedTask = incompleteSplits[0];
-  const tasksToDelete = incompleteSplits.slice(1);
+  // Prefer using the original task (the one whose ID matches originalTaskId) as the merged task
+  // This preserves the original task ID through the merge process
+  let mergedTask = incompleteSplits.find(s => s.id === originalTaskId);
+  let tasksToDelete;
+  
+  if (mergedTask) {
+    // Original task is still present and incomplete - use it
+    tasksToDelete = incompleteSplits.filter(s => s.id !== originalTaskId);
+  } else {
+    // Original task was completed or not found - use first incomplete split
+    mergedTask = incompleteSplits[0];
+    tasksToDelete = incompleteSplits.slice(1);
+  }
 
-  // Update the merged task
+  // Update the merged task with combined time tracking data
   await PluginAPI.updateTask(mergedTask.id, {
     title: mergeData.title,
     timeEstimate: mergeData.totalTimeEstimate,
     timeSpent: mergeData.totalTimeSpent,
+    timeSpentOnDay: mergeData.totalTimeSpentOnDay,
     notes: `[AutoPlan] Merged from ${mergeData.mergedCount} split tasks.\n\nOriginal Task ID: ${originalTaskId}`,
   });
 

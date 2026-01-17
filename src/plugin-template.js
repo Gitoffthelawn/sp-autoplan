@@ -54,51 +54,68 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
         scheduledAt: items[0].startTime,
       });
     } else {
-      // Create split tasks
+      // Split task into multiple blocks
+      // IMPORTANT: Preserve the original task as the first split to maintain task ID
       const splitTaskIds = [];
       
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        
-        // Create new task for this split
-        const newTaskId = await PluginAPI.addTask({
-          title: item.split.title,
-          timeEstimate: item.split.estimatedMs,
-          tagIds: item.split.tagIds,
-          projectId: item.split.projectId,
-          parentId: item.split.parentId,
-          notes: TaskMerger.generateSplitNotes(
-            item.split.splitIndex,
-            item.split.totalSplits,
-            originalTask.title,
-            originalId
-          ),
-        });
-
-        // Set the scheduled time via updateTask using appropriate field
         const schedulingFields = getSchedulingFields(item.startTime);
-        await PluginAPI.updateTask(newTaskId, schedulingFields);
+        
+        if (i === 0) {
+          // First split: UPDATE the original task instead of creating a new one
+          // This preserves the original task ID and keeps the timeSpent
+          await PluginAPI.updateTask(originalId, {
+            title: item.split.title,
+            timeEstimate: item.split.estimatedMs,
+            // timeSpent is preserved automatically since we're updating, not creating
+            notes: TaskMerger.generateSplitNotes(
+              item.split.splitIndex,
+              item.split.totalSplits,
+              originalTask.title,
+              originalId
+            ),
+            ...schedulingFields,
+          });
 
-        splitTaskIds.push(newTaskId);
-        createdTasks.push({
-          type: 'created',
-          taskId: newTaskId,
-          originalTaskId: originalId,
-          splitIndex: item.split.splitIndex,
-          scheduledAt: item.startTime,
-        });
-      }
+          splitTaskIds.push(originalId);
+          createdTasks.push({
+            type: 'updated',
+            taskId: originalId,
+            originalTaskId: originalId,
+            splitIndex: item.split.splitIndex,
+            scheduledAt: item.startTime,
+          });
+        } else {
+          // Subsequent splits: Create new tasks with no time tracking data
+          const newTaskId = await PluginAPI.addTask({
+            title: item.split.title,
+            timeEstimate: item.split.estimatedMs,
+            timeSpent: 0, // New splits start with no time spent
+            timeSpentOnDay: {}, // New splits start with empty time-on-day tracking
+            tagIds: item.split.tagIds,
+            projectId: item.split.projectId,
+            parentId: item.split.parentId,
+            notes: TaskMerger.generateSplitNotes(
+              item.split.splitIndex,
+              item.split.totalSplits,
+              originalTask.title,
+              originalId
+            ),
+          });
 
-      // Delete the original task since it's now been split
-      try {
-        await PluginAPI.deleteTask(originalId);
-      } catch (e) {
-        console.warn('[AutoPlan] Could not delete original task:', e);
-        // Fallback: mark as done and add note
-        await PluginAPI.updateTask(originalId, {
-          isDone: true,
-          notes: `${originalTask.notes || ''}\n\n[AutoPlan] This task was split into ${items.length} blocks.`,
-        });
+          // Set the scheduled time via updateTask using appropriate field
+          await PluginAPI.updateTask(newTaskId, schedulingFields);
+
+          splitTaskIds.push(newTaskId);
+          createdTasks.push({
+            type: 'created',
+            taskId: newTaskId,
+            originalTaskId: originalId,
+            splitIndex: item.split.splitIndex,
+            scheduledAt: item.startTime,
+          });
+        }
       }
     }
   }
@@ -158,18 +175,29 @@ TaskMerger.mergeSplits = async function(taskId, silent = false) {
     return null;
   }
 
-  // Calculate merge data
-  const mergeData = this.calculateMergeData(incompleteSplits, originalTitle);
+  // Calculate merge data - pass all splits to include time spent from completed ones
+  const mergeData = this.calculateMergeData(incompleteSplits, splits, originalTitle);
 
-  // Use the first incomplete split as the merged task
-  const mergedTask = incompleteSplits[0];
-  const tasksToDelete = incompleteSplits.slice(1);
+  // Prefer using the original task (the one whose ID matches originalTaskId) as the merged task
+  // This preserves the original task ID through the merge process
+  let mergedTask = incompleteSplits.find(s => s.id === originalTaskId);
+  let tasksToDelete;
+  
+  if (mergedTask) {
+    // Original task is still present and incomplete - use it
+    tasksToDelete = incompleteSplits.filter(s => s.id !== originalTaskId);
+  } else {
+    // Original task was completed or not found - use first incomplete split
+    mergedTask = incompleteSplits[0];
+    tasksToDelete = incompleteSplits.slice(1);
+  }
 
-  // Update the merged task
+  // Update the merged task with combined time tracking data
   await PluginAPI.updateTask(mergedTask.id, {
     title: mergeData.title,
     timeEstimate: mergeData.totalTimeEstimate,
     timeSpent: mergeData.totalTimeSpent,
+    timeSpentOnDay: mergeData.totalTimeSpentOnDay,
     notes: `[AutoPlan] Merged from ${mergeData.mergedCount} split tasks.\n\nOriginal Task ID: ${originalTaskId}`,
   });
 

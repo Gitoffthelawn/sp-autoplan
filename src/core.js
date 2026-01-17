@@ -426,6 +426,10 @@ export const TaskSplitter = {
         splitName = `${splitName} <${toRoman(i + 1)}>`;
       }
 
+      // First split inherits timeSpent and timeSpentOnDay from original task, others start empty
+      const timeSpentMs = i === 0 ? (task.timeSpent || 0) : 0;
+      const timeSpentOnDay = i === 0 ? (task.timeSpentOnDay || {}) : {};
+      
       splits.push({
         originalTaskId: task.id,
         originalTask: task,
@@ -434,6 +438,8 @@ export const TaskSplitter = {
         title: splitName,
         estimatedHours: blockHours,
         estimatedMs: blockHours * 60 * 60 * 1000,
+        timeSpentMs: timeSpentMs,
+        timeSpentOnDay: timeSpentOnDay,
         tagIds: task.tagIds || [],
         projectId: task.projectId,
         parentId: task.parentId,
@@ -1038,16 +1044,46 @@ export const TaskMerger = {
   },
 
   /**
-   * Calculate merged task data from splits
+   * Merge multiple timeSpentOnDay objects into one
+   * Each timeSpentOnDay is an object like { "2024-01-15": 3600000, "2024-01-16": 1800000 }
+   * @param {Array} timeSpentOnDayObjects - Array of timeSpentOnDay objects to merge
+   * @returns {Object} Combined timeSpentOnDay with summed values for each day
    */
-  calculateMergeData(incompleteSplits, originalTitle) {
+  mergeTimeSpentOnDay(timeSpentOnDayObjects) {
+    const merged = {};
+    for (const timeSpentOnDay of timeSpentOnDayObjects) {
+      if (!timeSpentOnDay || typeof timeSpentOnDay !== 'object') continue;
+      for (const [day, ms] of Object.entries(timeSpentOnDay)) {
+        merged[day] = (merged[day] || 0) + (ms || 0);
+      }
+    }
+    return merged;
+  },
+
+  /**
+   * Calculate merged task data from splits
+   * @param {Array} incompleteSplits - Splits that are not done (for time estimate)
+   * @param {Array} allSplits - All splits including completed ones (for time spent)
+   * @param {string} originalTitle - The original task title
+   */
+  calculateMergeData(incompleteSplits, allSplits, originalTitle) {
     let totalTimeEstimate = 0;
     let totalTimeSpent = 0;
     
+    // Sum time estimates from incomplete splits only (remaining work)
     for (const split of incompleteSplits) {
       totalTimeEstimate += split.timeEstimate || 0;
+    }
+    
+    // Sum time spent from ALL splits including completed ones
+    for (const split of allSplits) {
       totalTimeSpent += split.timeSpent || 0;
     }
+    
+    // Merge timeSpentOnDay from ALL splits
+    const mergedTimeSpentOnDay = this.mergeTimeSpentOnDay(
+      allSplits.map(s => s.timeSpentOnDay)
+    );
 
     // Clean title by removing Roman numeral suffix in <> brackets
     // Pattern: " <I>", " <II>", " <XIV>", etc.
@@ -1057,6 +1093,7 @@ export const TaskMerger = {
       title: cleanTitle,
       totalTimeEstimate,
       totalTimeSpent,
+      totalTimeSpentOnDay: mergedTimeSpentOnDay,
       mergedCount: incompleteSplits.length,
     };
   },
