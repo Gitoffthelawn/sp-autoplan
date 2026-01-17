@@ -33,18 +33,28 @@ export const DEFAULT_CONFIG = {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-// Milliseconds per day constant for date calculations
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
+// Time constants for calculations
+const MS_PER_HOUR = 1000 * 60 * 60;
+const MS_PER_DAY = MS_PER_HOUR * 24;
 
 // Urgency weight reduction step for auto-adjust scheduling
 const URGENCY_WEIGHT_STEP = 0.1;
+
+// Priority calculation constants
+const MAX_ROMAN_NUMERAL = 3999;
+const OLDNESS_EXPONENTIAL_CAP_DAYS = 100;
+const OLDNESS_EXPONENTIAL_BASE = 1.1;
+
+// Deadline priority thresholds (in days)
+const DEADLINE_OVERDUE_THRESHOLD_DAYS = 7;
+const DEADLINE_LINEAR_RANGE_DAYS = 21;
 
 /**
  * Convert number to Roman numerals
  */
 export function toRoman(num) {
   if (num <= 0) return 'I'; // Handle edge case - minimum is I
-  if (num > 3999) return String(num); // Roman numerals only go up to 3999
+  if (num > MAX_ROMAN_NUMERAL) return String(num); // Roman numerals only go up to 3999
   
   const romanNumerals = [
     ['M', 1000], ['CM', 900], ['D', 500], ['CD', 400],
@@ -66,7 +76,7 @@ export function toRoman(num) {
  * @description Utility function exported for external use and testing
  */
 export function hoursBetween(date1, date2) {
-  return Math.abs(date2 - date1) / (1000 * 60 * 60);
+  return Math.abs(date2 - date1) / MS_PER_HOUR;
 }
 
 /**
@@ -90,7 +100,7 @@ export function getTaskAgeInDays(task, now = new Date()) {
  */
 export function getEstimatedHours(task) {
   if (task.timeEstimate) {
-    return task.timeEstimate / (1000 * 60 * 60);
+    return task.timeEstimate / MS_PER_HOUR;
   }
   return 0;
 }
@@ -100,7 +110,7 @@ export function getEstimatedHours(task) {
  */
 export function getRemainingHours(task) {
   const estimated = getEstimatedHours(task);
-  const spent = task.timeSpent ? task.timeSpent / (1000 * 60 * 60) : 0;
+  const spent = task.timeSpent ? task.timeSpent / MS_PER_HOUR : 0;
   return Math.max(0, estimated - spent);
 }
 
@@ -196,6 +206,26 @@ export function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Check if a task has a specific tag
+ * @param {Object} task - The task to check
+ * @param {string} tagId - The tag ID to look for
+ * @returns {boolean} True if the task has the tag
+ */
+export function hasTag(task, tagId) {
+  return !!(tagId && task && task.tagIds && task.tagIds.includes(tagId));
+}
+
+/**
+ * Check if a task is a fixed task (has the do-not-reschedule tag)
+ * @param {Object} task - The task to check
+ * @param {Object} config - Configuration object with doNotRescheduleTagId
+ * @returns {boolean} True if the task should not be rescheduled
+ */
+export function isFixedTask(task, config) {
+  return hasTag(task, config?.doNotRescheduleTagId);
+}
+
 // ============================================================================
 // PRIORITY CALCULATION MODULE
 // ============================================================================
@@ -271,9 +301,9 @@ export const PriorityCalculator = {
     let factor;
     switch (formula) {
       case 'exponential':
-        // Cap at 100 days to prevent overflow (1.1^100 ≈ 13780)
-        const cappedDays = Math.min(days, 100);
-        factor = Math.pow(1.1, cappedDays);
+        // Cap days to prevent overflow
+        const cappedDays = Math.min(days, OLDNESS_EXPONENTIAL_CAP_DAYS);
+        factor = Math.pow(OLDNESS_EXPONENTIAL_BASE, cappedDays);
         break;
       case 'log':
         factor = Math.log(days + 1);
@@ -289,7 +319,7 @@ export const PriorityCalculator = {
   /**
    * Calculate deadline-based priority factor
    * Tasks with approaching deadlines get higher priority
-   * Uses a 21-day range similar to taskcheck's urgency.due algorithm
+   * Uses a configurable day range similar to taskcheck's urgency.due algorithm
    * 
    * @param {Object} task - The task to calculate deadline urgency for
    * @param {string} formula - 'linear', 'aggressive', or 'none'
@@ -315,17 +345,17 @@ export const PriorityCalculator = {
         // Just due = 0.9
         // 1 week away = 0.5
         // 2+ weeks away = 0.2 (minimum)
-        if (daysUntilDue <= -7) {
+        if (daysUntilDue <= -DEADLINE_OVERDUE_THRESHOLD_DAYS) {
           factor = 1.0;
         } else if (daysUntilDue <= 0) {
           // Overdue (0-7 days overdue): 0.9 to 1.0
-          factor = 0.9 + (-daysUntilDue / 7) * 0.1;
-        } else if (daysUntilDue <= 7) {
+          factor = 0.9 + (-daysUntilDue / DEADLINE_OVERDUE_THRESHOLD_DAYS) * 0.1;
+        } else if (daysUntilDue <= DEADLINE_OVERDUE_THRESHOLD_DAYS) {
           // Within 1 week: 0.5 to 0.9
-          factor = 0.9 - (daysUntilDue / 7) * 0.4;
-        } else if (daysUntilDue <= 14) {
+          factor = 0.9 - (daysUntilDue / DEADLINE_OVERDUE_THRESHOLD_DAYS) * 0.4;
+        } else if (daysUntilDue <= DEADLINE_OVERDUE_THRESHOLD_DAYS * 2) {
           // Within 2 weeks: 0.2 to 0.5
-          factor = 0.5 - ((daysUntilDue - 7) / 7) * 0.3;
+          factor = 0.5 - ((daysUntilDue - DEADLINE_OVERDUE_THRESHOLD_DAYS) / DEADLINE_OVERDUE_THRESHOLD_DAYS) * 0.3;
         } else {
           factor = 0.2;
         }
@@ -336,14 +366,14 @@ export const PriorityCalculator = {
         // Maps a 21-day range to 0.2 - 1.0
         // Overdue (7+ days) = 1.0
         // 14 days in future = 0.2
-        if (daysUntilDue <= -7) {
+        if (daysUntilDue <= -DEADLINE_OVERDUE_THRESHOLD_DAYS) {
           factor = 1.0;
-        } else if (daysUntilDue >= 14) {
+        } else if (daysUntilDue >= DEADLINE_OVERDUE_THRESHOLD_DAYS * 2) {
           factor = 0.2;
         } else {
           // Linear interpolation from -7 days (1.0) to +14 days (0.2)
           // Range of 21 days maps to range of 0.8
-          factor = 1.0 - ((daysUntilDue + 7) / 21) * 0.8;
+          factor = 1.0 - ((daysUntilDue + DEADLINE_OVERDUE_THRESHOLD_DAYS) / DEADLINE_LINEAR_RANGE_DAYS) * 0.8;
         }
         break;
     }
@@ -562,6 +592,141 @@ export const AutoPlanner = {
   },
 
   /**
+   * Calculate urgency for a split, considering total remaining work for the original task
+   * @param {Object} split - The split to calculate urgency for
+   * @param {Array} remainingSplits - All remaining unscheduled splits
+   * @param {Object} config - Configuration object
+   * @param {Array} allTags - All available tags
+   * @param {Array} allProjects - All available projects
+   * @param {Date} simulatedTime - Current simulation time
+   * @returns {Object} - { split, urgency, urgencyComponents, index }
+   */
+  calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime) {
+    // Calculate total remaining time for all unscheduled splits of the same original task
+    const remainingSplitsForTask = remainingSplits.filter(
+      s => s.originalTaskId === split.originalTaskId
+    );
+    const totalRemainingMs = remainingSplitsForTask.reduce(
+      (sum, s) => sum + s.estimatedMs, 0
+    );
+
+    // Create a pseudo-task for urgency calculation
+    // Use the total remaining time for the original task, not just this split's time
+    const pseudoTask = {
+      ...split.originalTask,
+      id: split.originalTaskId,
+      timeEstimate: totalRemainingMs,
+      timeSpent: 0,
+    };
+
+    const urgency = PriorityCalculator.calculateUrgency(
+      pseudoTask, 
+      config,
+      allTags,
+      allProjects,
+      simulatedTime
+    );
+
+    return {
+      split,
+      urgency: urgency.total,
+      urgencyComponents: urgency.components,
+    };
+  },
+
+  /**
+   * Sort splits by urgency with deterministic tiebreakers
+   * Primary: higher urgency first
+   * Secondary: older tasks first (lower created timestamp)
+   * Tertiary: alphabetical by task ID
+   * @param {Array} splitsWithUrgency - Array of { split, urgency, urgencyComponents }
+   * @returns {Array} - Sorted array (mutates in place)
+   */
+  sortSplitsByUrgency(splitsWithUrgency) {
+    return splitsWithUrgency.sort((a, b) => {
+      // Primary: higher urgency first
+      if (b.urgency !== a.urgency) {
+        return b.urgency - a.urgency;
+      }
+      // Secondary: older tasks first (lower created timestamp)
+      const aCreated = a.split.originalTask?.created || 0;
+      const bCreated = b.split.originalTask?.created || 0;
+      if (aCreated !== bCreated) {
+        return aCreated - bCreated;
+      }
+      // Tertiary: alphabetical by task ID for full determinism
+      return (a.split.originalTaskId || '').localeCompare(b.split.originalTaskId || '');
+    });
+  },
+
+  /**
+   * Create a dynamic split for overflow time
+   * @param {Object} mostUrgentSplit - The original split being split
+   * @param {number} remainderMinutes - Minutes that don't fit in current day
+   * @param {Array} remainingSplits - All remaining splits (will be updated)
+   * @param {Object} config - Configuration object
+   * @returns {Object} - The new split object
+   */
+  createDynamicSplit(mostUrgentSplit, remainderMinutes, remainingSplits, config) {
+    const remainderHours = remainderMinutes / 60;
+    const newSplitIndex = mostUrgentSplit.totalSplits; // Append at end
+    
+    // Update all splits for this task to reflect new total
+    for (const split of remainingSplits) {
+      if (split.originalTaskId === mostUrgentSplit.originalTaskId) {
+        split.totalSplits = newSplitIndex + 1;
+      }
+    }
+    
+    // Determine the title for the new split
+    let newSplitTitle = mostUrgentSplit.originalTask.title;
+    if (config.splitPrefix) {
+      newSplitTitle = config.splitPrefix + newSplitTitle;
+    }
+    if (config.splitSuffix !== false) {
+      newSplitTitle = `${newSplitTitle} <${toRoman(newSplitIndex + 1)}>`;
+    }
+    
+    const newSplit = {
+      originalTaskId: mostUrgentSplit.originalTaskId,
+      originalTask: mostUrgentSplit.originalTask,
+      splitIndex: newSplitIndex,
+      totalSplits: newSplitIndex + 1,
+      title: newSplitTitle,
+      estimatedHours: remainderHours,
+      estimatedMs: remainderMinutes * 60 * 1000,
+      tagIds: mostUrgentSplit.tagIds,
+      projectId: mostUrgentSplit.projectId,
+      parentId: mostUrgentSplit.parentId,
+      prevSplitIndex: mostUrgentSplit.splitIndex,
+      nextSplitIndex: null,
+    };
+    
+    // Update the current split's next pointer
+    mostUrgentSplit.nextSplitIndex = newSplitIndex;
+    mostUrgentSplit.totalSplits = newSplitIndex + 1;
+    
+    return newSplit;
+  },
+
+  /**
+   * Calculate the block start time from simulation state
+   * @param {Date} simulatedTime - Current simulation date
+   * @param {number} currentDayMinutes - Minutes into the workday
+   * @param {number} workdayStartHour - Hour when workday starts
+   * @returns {Date} - Start time for the block
+   */
+  calculateBlockStartTime(simulatedTime, currentDayMinutes, workdayStartHour) {
+    const blockStartTime = new Date(simulatedTime);
+    const totalMinutesFromMidnight = workdayStartHour * 60 + currentDayMinutes;
+    blockStartTime.setHours(Math.floor(totalMinutesFromMidnight / 60));
+    blockStartTime.setMinutes(totalMinutesFromMidnight % 60);
+    blockStartTime.setSeconds(0);
+    blockStartTime.setMilliseconds(0);
+    return blockStartTime;
+  },
+
+  /**
    * Calculate fixed task minutes per day from a list of fixed tasks
    * Fixed tasks are tasks that have the "do not reschedule" tag and have a scheduled time
    */
@@ -646,57 +811,11 @@ export const AutoPlanner = {
     let daysScheduled = 0;
 
     while (remainingSplits.length > 0 && daysScheduled < maxDaysAhead) {
-      // Calculate urgency for all remaining splits
-      const splitsWithUrgency = remainingSplits.map((split, index) => {
-        // Calculate total remaining time for all unscheduled splits of the same original task
-        const remainingSplitsForTask = remainingSplits.filter(
-          s => s.originalTaskId === split.originalTaskId
-        );
-        const totalRemainingMs = remainingSplitsForTask.reduce(
-          (sum, s) => sum + s.estimatedMs, 0
-        );
-
-        // Create a pseudo-task for urgency calculation
-        // Use the total remaining time for the original task, not just this split's time
-        const pseudoTask = {
-          ...split.originalTask,
-          id: split.originalTaskId,
-          timeEstimate: totalRemainingMs,
-          timeSpent: 0,
-        };
-
-        const urgency = PriorityCalculator.calculateUrgency(
-          pseudoTask, 
-          config,
-          allTags,
-          allProjects,
-          simulatedTime
-        );
-
-        return {
-          split,
-          urgency: urgency.total,
-          urgencyComponents: urgency.components,
-          index
-        };
-      });
-
-      // Sort by urgency (highest first), with secondary sort by creation date (oldest first)
-      // and tertiary sort by task ID for full determinism
-      splitsWithUrgency.sort((a, b) => {
-        // Primary: higher urgency first
-        if (b.urgency !== a.urgency) {
-          return b.urgency - a.urgency;
-        }
-        // Secondary: older tasks first (lower created timestamp)
-        const aCreated = a.split.originalTask?.created || 0;
-        const bCreated = b.split.originalTask?.created || 0;
-        if (aCreated !== bCreated) {
-          return aCreated - bCreated;
-        }
-        // Tertiary: alphabetical by task ID for full determinism
-        return (a.split.originalTaskId || '').localeCompare(b.split.originalTaskId || '');
-      });
+      // Calculate urgency for all remaining splits and sort by priority
+      const splitsWithUrgency = remainingSplits.map(split => 
+        this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime)
+      );
+      this.sortSplitsByUrgency(splitsWithUrgency);
 
       // Get the most urgent split
       const mostUrgent = splitsWithUrgency[0];
@@ -713,46 +832,17 @@ export const AutoPlanner = {
           const remainderMinutes = blockMinutes - remainingMinutesToday;
           blockMinutes = remainingMinutesToday;
           
-          // Create a new split for the remaining time
-          const remainderHours = remainderMinutes / 60;
-          const newSplitIndex = mostUrgent.split.totalSplits; // Append at end
+          // Create a dynamic split for the overflow
+          const newSplit = this.createDynamicSplit(
+            mostUrgent.split, 
+            remainderMinutes, 
+            remainingSplits, 
+            config
+          );
           
-          // Update all splits for this task to reflect new total
-          for (const split of remainingSplits) {
-            if (split.originalTaskId === mostUrgent.split.originalTaskId) {
-              split.totalSplits = newSplitIndex + 1;
-            }
-          }
-          
-          // Determine the title for the new split
-          let newSplitTitle = mostUrgent.split.originalTask.title;
-          if (config.splitPrefix) {
-            newSplitTitle = config.splitPrefix + newSplitTitle;
-          }
-          if (config.splitSuffix !== false) {
-            newSplitTitle = `${newSplitTitle} <${toRoman(newSplitIndex + 1)}>`;
-          }
-          
-          const newSplit = {
-            originalTaskId: mostUrgent.split.originalTaskId,
-            originalTask: mostUrgent.split.originalTask,
-            splitIndex: newSplitIndex,
-            totalSplits: newSplitIndex + 1,
-            title: newSplitTitle,
-            estimatedHours: remainderHours,
-            estimatedMs: remainderMinutes * 60 * 1000,
-            tagIds: mostUrgent.split.tagIds,
-            projectId: mostUrgent.split.projectId,
-            parentId: mostUrgent.split.parentId,
-            prevSplitIndex: mostUrgent.split.splitIndex,
-            nextSplitIndex: null,
-          };
-          
-          // Update the current split's next pointer and estimated time
-          mostUrgent.split.nextSplitIndex = newSplitIndex;
+          // Update the current split's estimated time
           mostUrgent.split.estimatedHours = blockMinutes / 60;
           mostUrgent.split.estimatedMs = blockMinutes * 60 * 1000;
-          mostUrgent.split.totalSplits = newSplitIndex + 1;
           
           // Add new split to remainingSplits for future scheduling
           remainingSplits.push(newSplit);
@@ -785,13 +875,7 @@ export const AutoPlanner = {
       }
 
       // Assign the block
-      const blockStartTime = new Date(simulatedTime);
-      // Calculate hours and minutes from currentDayMinutes offset from workday start
-      const totalMinutesFromMidnight = workdayStartHour * 60 + currentDayMinutes;
-      blockStartTime.setHours(Math.floor(totalMinutesFromMidnight / 60));
-      blockStartTime.setMinutes(totalMinutesFromMidnight % 60);
-      blockStartTime.setSeconds(0);
-      blockStartTime.setMilliseconds(0);
+      const blockStartTime = this.calculateBlockStartTime(simulatedTime, currentDayMinutes, workdayStartHour);
       
       const endTime = new Date(blockStartTime);
       endTime.setMinutes(endTime.getMinutes() + blockMinutes);

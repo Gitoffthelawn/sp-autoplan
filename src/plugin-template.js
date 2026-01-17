@@ -330,12 +330,10 @@ async function runAutoplan(dryRun = false) {
     if (config.doNotRescheduleTagId) {
       fixedTasks = allTasks.filter(t => 
         !t.isDone && 
-        t.tagIds && 
-        t.tagIds.includes(config.doNotRescheduleTagId)
+        isFixedTask(t, config)
       );
       schedulableTasks = allTasks.filter(t => 
-        !t.tagIds || 
-        !t.tagIds.includes(config.doNotRescheduleTagId)
+        !isFixedTask(t, config)
       );
       console.log(`[AutoPlan] ${fixedTasks.length} fixed tasks (will not be rescheduled)`);
     }
@@ -419,6 +417,102 @@ async function previewSchedule() {
 }
 
 /**
+ * Merge all split task groups back into single tasks
+ * @returns {Promise<number>} Number of groups merged
+ */
+async function mergeAllSplitGroups() {
+  console.log('[AutoPlan] Merging split tasks...');
+  const splitGroups = await TaskMerger.findAllSplitGroupsAsync();
+  let mergedCount = 0;
+  
+  for (const group of splitGroups) {
+    // Get the first task ID from the group to trigger merge
+    const firstTaskId = group.splits[0];
+    try {
+      // Pass silent=true to suppress individual merge notifications
+      const result = await TaskMerger.mergeSplits(firstTaskId, true);
+      if (result) {
+        mergedCount++;
+        console.log(`[AutoPlan] Merged group: ${group.originalTitle}`);
+      }
+    } catch (e) {
+      console.warn(`[AutoPlan] Failed to merge group ${group.originalTitle}:`, e);
+    }
+  }
+  
+  console.log(`[AutoPlan] Merged ${mergedCount} split task groups`);
+  return mergedCount;
+}
+
+/**
+ * Clear planning fields from tasks
+ * @param {Object} config - Configuration object with doNotRescheduleTagId
+ * @returns {Promise<number>} Number of tasks cleared
+ */
+async function clearTasksPlanning(config) {
+  console.log('[AutoPlan] Clearing planning...');
+  const allTasks = await PluginAPI.getTasks();
+
+  // Filter tasks that should have their planning cleared:
+  // - Not done
+  // - Has time estimate
+  // - Does NOT have the "do not reschedule" tag
+  const tasksToClear = allTasks.filter(task => {
+    // Skip completed tasks
+    if (task.isDone) return false;
+    
+    // Skip tasks without time estimate
+    if (!task.timeEstimate || task.timeEstimate <= 0) return false;
+    
+    // Skip tasks with "do not reschedule" tag
+    if (isFixedTask(task, config)) {
+      return false;
+    }
+    
+    // Only include tasks that have some planning set
+    if (!task.dueWithTime && !task.dueDay) return false;
+    
+    return true;
+  });
+
+  console.log(`[AutoPlan] Found ${tasksToClear.length} tasks to clear planning from`);
+
+  // Clear planning from each task
+  let clearedCount = 0;
+  for (const task of tasksToClear) {
+    try {
+      await PluginAPI.updateTask(task.id, {
+        dueWithTime: undefined,
+        dueDay: undefined,
+        hasPlannedTime: undefined,
+      });
+      clearedCount++;
+    } catch (e) {
+      console.warn(`[AutoPlan] Failed to clear planning for task ${task.id}:`, e);
+    }
+  }
+
+  return clearedCount;
+}
+
+/**
+ * Build result message for clear planning operation
+ * @param {number} mergedCount - Number of split groups merged
+ * @param {number} clearedCount - Number of tasks cleared
+ * @returns {string} - User-friendly message
+ */
+function buildClearPlanningMessage(mergedCount, clearedCount) {
+  if (mergedCount > 0 && clearedCount > 0) {
+    return `Merged ${mergedCount} split groups, cleared planning from ${clearedCount} tasks`;
+  } else if (mergedCount > 0) {
+    return `Merged ${mergedCount} split groups`;
+  } else if (clearedCount > 0) {
+    return `Cleared planning from ${clearedCount} tasks`;
+  }
+  return 'No tasks to clear planning from';
+}
+
+/**
  * Clear planning (dueWithTime, dueDay, hasPlannedTime) from all tasks that:
  * - Don't have the "Do Not Reschedule" tag
  * - Have a time estimation
@@ -435,81 +529,13 @@ async function clearPlanning(silent = false) {
     const config = await loadConfig();
     
     // Step 1: Merge all split tasks first
-    console.log('[AutoPlan] Step 1: Merging split tasks...');
-    const splitGroups = await TaskMerger.findAllSplitGroupsAsync();
-    let mergedCount = 0;
-    
-    for (const group of splitGroups) {
-      // Get the first task ID from the group to trigger merge
-      const firstTaskId = group.splits[0];
-      try {
-        // Pass silent=true to suppress individual merge notifications
-        const result = await TaskMerger.mergeSplits(firstTaskId, true);
-        if (result) {
-          mergedCount++;
-          console.log(`[AutoPlan] Merged group: ${group.originalTitle}`);
-        }
-      } catch (e) {
-        console.warn(`[AutoPlan] Failed to merge group ${group.originalTitle}:`, e);
-      }
-    }
-    
-    console.log(`[AutoPlan] Merged ${mergedCount} split task groups`);
+    const mergedCount = await mergeAllSplitGroups();
 
     // Step 2: Clear planning from all eligible tasks
-    console.log('[AutoPlan] Step 2: Clearing planning...');
-    const allTasks = await PluginAPI.getTasks();
+    const clearedCount = await clearTasksPlanning(config);
 
-    // Filter tasks that should have their planning cleared:
-    // - Not done
-    // - Has time estimate
-    // - Does NOT have the "do not reschedule" tag
-    const tasksToClear = allTasks.filter(task => {
-      // Skip completed tasks
-      if (task.isDone) return false;
-      
-      // Skip tasks without time estimate
-      if (!task.timeEstimate || task.timeEstimate <= 0) return false;
-      
-      // Skip tasks with "do not reschedule" tag
-      if (config.doNotRescheduleTagId && task.tagIds && task.tagIds.includes(config.doNotRescheduleTagId)) {
-        return false;
-      }
-      
-      // Only include tasks that have some planning set
-      if (!task.dueWithTime && !task.dueDay) return false;
-      
-      return true;
-    });
-
-    console.log(`[AutoPlan] Found ${tasksToClear.length} tasks to clear planning from`);
-
-    // Clear planning from each task
-    let clearedCount = 0;
-    for (const task of tasksToClear) {
-      try {
-        await PluginAPI.updateTask(task.id, {
-          dueWithTime: undefined,
-          dueDay: undefined,
-          hasPlannedTime: undefined,
-        });
-        clearedCount++;
-      } catch (e) {
-        console.warn(`[AutoPlan] Failed to clear planning for task ${task.id}:`, e);
-      }
-    }
-
-    // Build result message
-    let message = '';
-    if (mergedCount > 0 && clearedCount > 0) {
-      message = `Merged ${mergedCount} split groups, cleared planning from ${clearedCount} tasks`;
-    } else if (mergedCount > 0) {
-      message = `Merged ${mergedCount} split groups`;
-    } else if (clearedCount > 0) {
-      message = `Cleared planning from ${clearedCount} tasks`;
-    } else {
-      message = 'No tasks to clear planning from';
-    }
+    // Build and show result message
+    const message = buildClearPlanningMessage(mergedCount, clearedCount);
 
     if (!silent) {
       PluginAPI.showSnack({
