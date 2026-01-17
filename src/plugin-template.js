@@ -360,7 +360,8 @@ async function runAutoplan(dryRun = false) {
     console.log(`[AutoPlan] Skipped ${skippedParents.length} parent tasks`);
 
     // Run scheduling algorithm
-    const { schedule, deadlineMisses } = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks);
+    // Pass allTasks for parent tag inheritance during priority calculation
+    const { schedule, deadlineMisses } = AutoPlanner.schedule(splits, config, allTags, allProjects, new Date(), fixedTasks, allTasks);
 
     console.log(`[AutoPlan] Generated schedule with ${schedule.length} entries`);
     if (deadlineMisses.length > 0) {
@@ -429,7 +430,8 @@ async function mergeAllSplitGroups() {
   
   for (const group of splitGroups) {
     // Get the first task ID from the group to trigger merge
-    const firstTaskId = group.splits[0];
+    // group.splits[0] is { task, splitInfo }, so we need .task.id
+    const firstTaskId = group.splits[0].task.id;
     try {
       // Pass silent=true to suppress individual merge notifications
       const result = await TaskMerger.mergeSplits(firstTaskId, true);

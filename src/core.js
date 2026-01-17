@@ -226,6 +226,30 @@ export function isFixedTask(task, config) {
   return hasTag(task, config?.doNotRescheduleTagId);
 }
 
+/**
+ * Get effective tag IDs for a task, including inherited tags from parent tasks
+ * @param {Object} task - The task to get tags for
+ * @param {Array} allTasks - All tasks (needed to look up parent)
+ * @returns {Array} Array of tag IDs including inherited ones
+ */
+export function getEffectiveTagIds(task, allTasks) {
+  const tagIds = new Set(task.tagIds || []);
+  
+  // If task has a parent, inherit parent's tags
+  if (task.parentId && allTasks) {
+    const parent = allTasks.find(t => t.id === task.parentId);
+    if (parent) {
+      // Recursively get parent's effective tags (handles nested subtasks)
+      const parentTags = getEffectiveTagIds(parent, allTasks);
+      for (const tagId of parentTags) {
+        tagIds.add(tagId);
+      }
+    }
+  }
+  
+  return Array.from(tagIds);
+}
+
 // ============================================================================
 // PRIORITY CALCULATION MODULE
 // ============================================================================
@@ -233,13 +257,20 @@ export function isFixedTask(task, config) {
 export const PriorityCalculator = {
   /**
    * Calculate tag-based priority boost
+   * Uses effective tag IDs which includes inherited tags from parent tasks
+   * @param {Object} task - The task to calculate priority for
+   * @param {Object} tagPriorities - Map of tag names to priority boosts
+   * @param {Array} allTags - All available tags
+   * @param {Array} allTasks - All tasks (needed for parent tag inheritance)
    */
-  calculateTagPriority(task, tagPriorities, allTags) {
-    if (!task.tagIds || task.tagIds.length === 0) return 0;
+  calculateTagPriority(task, tagPriorities, allTags, allTasks = []) {
+    // Get effective tags including inherited ones from parent
+    const effectiveTagIds = getEffectiveTagIds(task, allTasks);
+    if (effectiveTagIds.length === 0) return 0;
     if (!tagPriorities || typeof tagPriorities !== 'object') return 0;
     
     let boost = 0;
-    for (const tagId of task.tagIds) {
+    for (const tagId of effectiveTagIds) {
       const tag = allTags.find(t => t.id === tagId);
       if (tag && tagPriorities[tag.name] !== undefined) {
         boost += Number(tagPriorities[tag.name]) || 0;
@@ -389,9 +420,10 @@ export const PriorityCalculator = {
    * @param {Array} allTags - All available tags
    * @param {Array} allProjects - All available projects
    * @param {Date} now - Current time for calculations
+   * @param {Array} allTasks - All tasks (needed for parent tag inheritance)
    */
-  calculateUrgency(task, config, allTags, allProjects = [], now = new Date()) {
-    const tagPriority = this.calculateTagPriority(task, config.tagPriorities || {}, allTags);
+  calculateUrgency(task, config, allTags, allProjects = [], now = new Date(), allTasks = []) {
+    const tagPriority = this.calculateTagPriority(task, config.tagPriorities || {}, allTags, allTasks);
     const projectPriority = this.calculateProjectPriority(task, config.projectPriorities || {}, allProjects);
     const durationPriority = this.calculateDurationPriority(
       task, config.durationFormula || 'none', config.durationWeight ?? 1.0
@@ -429,6 +461,9 @@ export const TaskSplitter = {
   /**
    * Split a task into time blocks
    * Returns an array of split task objects
+   * @param {Object} task - The task to split
+   * @param {number} blockSizeMinutes - Size of each block in minutes
+   * @param {Object} config - Configuration object
    */
   splitTask(task, blockSizeMinutes, config) {
     // Validate inputs
@@ -436,17 +471,24 @@ export const TaskSplitter = {
       blockSizeMinutes = DEFAULT_CONFIG.blockSizeMinutes;
     }
 
+    // Use total estimated hours (not remaining) to preserve time spent during merge
+    // The first split inherits timeSpent, so total timeEstimate of all splits
+    // should equal the original task's timeEstimate
+    const estimatedHours = getEstimatedHours(task);
+    if (estimatedHours <= 0) return [];
+    
+    // Still check remaining hours to skip fully completed tasks
     const remainingHours = getRemainingHours(task);
     if (remainingHours <= 0) return [];
 
     const blockSizeHours = blockSizeMinutes / 60;
-    const numBlocks = Math.ceil(remainingHours / blockSizeHours);
+    const numBlocks = Math.ceil(estimatedHours / blockSizeHours);
     const splits = [];
 
     for (let i = 0; i < numBlocks; i++) {
       const isLastBlock = i === numBlocks - 1;
       const blockHours = isLastBlock 
-        ? remainingHours - (i * blockSizeHours) 
+        ? estimatedHours - (i * blockSizeHours) 
         : blockSizeHours;
 
       let splitName = task.title;
@@ -494,6 +536,9 @@ export const TaskSplitter = {
   /**
    * Process all tasks and split them into blocks
    * Skips parent tasks that have subtasks
+   * @param {Array} tasks - Tasks to process
+   * @param {number} blockSizeMinutes - Size of each block in minutes
+   * @param {Object} config - Configuration object
    */
   processAllTasks(tasks, blockSizeMinutes, config) {
     // Find parent task IDs (tasks that have subtasks)
@@ -599,9 +644,10 @@ export const AutoPlanner = {
    * @param {Array} allTags - All available tags
    * @param {Array} allProjects - All available projects
    * @param {Date} simulatedTime - Current simulation time
+   * @param {Array} allTasks - All tasks (needed for parent tag inheritance)
    * @returns {Object} - { split, urgency, urgencyComponents, index }
    */
-  calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime) {
+  calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime, allTasks = []) {
     // Calculate total remaining time for all unscheduled splits of the same original task
     const remainingSplitsForTask = remainingSplits.filter(
       s => s.originalTaskId === split.originalTaskId
@@ -624,7 +670,8 @@ export const AutoPlanner = {
       config,
       allTags,
       allProjects,
-      simulatedTime
+      simulatedTime,
+      allTasks
     );
 
     return {
@@ -763,10 +810,11 @@ export const AutoPlanner = {
    * @param {Array} allProjects - All available projects
    * @param {Date} startTime - When to start scheduling from
    * @param {Array} fixedTasks - Tasks that should not be rescheduled (optional)
+   * @param {Array} allTasks - All tasks (needed for parent tag inheritance)
    * @returns {Object} - { schedule: Array, deadlineMisses: Array } where schedule contains scheduled items
    *                     and deadlineMisses contains tasks that will miss their deadlines
    */
-  schedule(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = []) {
+  schedule(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = [], allTasks = []) {
     if (splits.length === 0) return { schedule: [], deadlineMisses: [] };
 
     const schedule = [];
@@ -813,7 +861,7 @@ export const AutoPlanner = {
     while (remainingSplits.length > 0 && daysScheduled < maxDaysAhead) {
       // Calculate urgency for all remaining splits and sort by priority
       const splitsWithUrgency = remainingSplits.map(split => 
-        this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime)
+        this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime, allTasks)
       );
       this.sortSplitsByUrgency(splitsWithUrgency);
 
@@ -1011,15 +1059,16 @@ export const AutoPlanner = {
    * @param {Array} allProjects - All available projects
    * @param {Date} startTime - When to start scheduling from
    * @param {Array} fixedTasks - Tasks that should not be rescheduled (optional)
+   * @param {Array} allTasks - All tasks (needed for parent tag inheritance)
    * @returns {Object} - { schedule, deadlineMisses, finalUrgencyWeight, adjustmentAttempts }
    */
-  scheduleWithAutoAdjust(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = []) {
+  scheduleWithAutoAdjust(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = [], allTasks = []) {
     const autoAdjust = config.autoAdjustUrgency ?? true;
     const initialWeight = config.urgencyWeight ?? 1.0;
     
     if (!autoAdjust) {
       // No auto-adjust, just run once
-      const result = this.schedule(splits, config, allTags, allProjects, startTime, fixedTasks);
+      const result = this.schedule(splits, config, allTags, allProjects, startTime, fixedTasks, allTasks);
       return {
         ...result,
         finalUrgencyWeight: initialWeight,
@@ -1039,7 +1088,7 @@ export const AutoPlanner = {
         urgencyWeight: currentWeight,
       };
       
-      result = this.schedule(splits, adjustedConfig, allTags, allProjects, startTime, fixedTasks);
+      result = this.schedule(splits, adjustedConfig, allTags, allProjects, startTime, fixedTasks, allTasks);
       
       // If no deadline misses, we're done
       if (result.deadlineMisses.length === 0) {
@@ -1055,7 +1104,7 @@ export const AutoPlanner = {
         currentWeight = 0;
         // One final try with weight = 0
         const finalConfig = { ...config, urgencyWeight: 0 };
-        result = this.schedule(splits, finalConfig, allTags, allProjects, startTime, fixedTasks);
+        result = this.schedule(splits, finalConfig, allTags, allProjects, startTime, fixedTasks, allTasks);
         break;
       }
     }

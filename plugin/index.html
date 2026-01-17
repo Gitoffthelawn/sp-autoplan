@@ -390,6 +390,45 @@
       border-radius: 50%;
       animation: spin 1s linear infinite;
     }
+
+    /* Priority List */
+    .priority-item {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--separator-color);
+    }
+
+    .priority-item:last-child {
+      border-bottom: none;
+    }
+
+    .priority-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .priority-title {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .priority-score {
+      font-size: 0.9em;
+      font-weight: 600;
+      padding: 4px 10px;
+      background: var(--c-primary, #7c4dff);
+      color: var(--c-primary-contrast, #ffffff);
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+
+    .priority-explanation {
+      font-size: 0.8em;
+      opacity: 0.5;
+      margin-top: 4px;
+      font-family: monospace;
+    }
   </style>
 </head>
 <body>
@@ -426,6 +465,7 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="settings">Settings</div>
+    <div class="tab" data-tab="priorities">Priorities</div>
     <div class="tab" data-tab="tags">Tag Priorities</div>
     <div class="tab" data-tab="projects">Project Priorities</div>
     <div class="tab" data-tab="formulas">Priority Formulas</div>
@@ -538,6 +578,24 @@
             <span>Saturday</span>
           </label>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Priorities Tab -->
+  <div id="tab-priorities" class="tab-content">
+    <div class="section">
+      <div class="section-title">Task Priorities</div>
+      <p class="section-description">
+        View all eligible tasks sorted by their computed priority score. Higher priority tasks are scheduled first.
+      </p>
+      
+      <button class="btn" onclick="loadTaskPriorities()">
+        Refresh Priorities
+      </button>
+
+      <div id="prioritiesList" style="margin-top: 16px;">
+        <p style="opacity: 0.7;">Click "Refresh Priorities" to load task priorities.</p>
       </div>
     </div>
   </div>
@@ -1543,6 +1601,328 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // Load and display task priorities
+    async function loadTaskPriorities() {
+      const container = document.getElementById('prioritiesList');
+      container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading task priorities...</div>';
+
+      try {
+        // Get current config for priority calculation
+        const configData = await PluginAPI.loadSyncedData();
+        const config = configData ? JSON.parse(configData) : getDefaultConfig();
+        
+        // Get all tasks, tags, and projects
+        const tasks = await PluginAPI.getTasks();
+        const allTags = await PluginAPI.getAllTags();
+        const allProjects = await PluginAPI.getAllProjects();
+        
+        // Find parent task IDs (tasks that have subtasks)
+        const parentIds = new Set();
+        for (const task of tasks) {
+          if (task.parentId) {
+            parentIds.add(task.parentId);
+          }
+        }
+        
+        // Build a map of task ID to task for quick parent lookup
+        const taskMap = new Map();
+        for (const task of tasks) {
+          taskMap.set(task.id, task);
+        }
+        
+        // Filter to eligible tasks:
+        // - not done
+        // - has time estimate
+        // - is NOT a parent task (exclude tasks that have subtasks)
+        const eligibleTasks = tasks.filter(t => 
+          !t.isDone && 
+          t.timeEstimate && 
+          t.timeEstimate > 0 &&
+          !parentIds.has(t.id)
+        );
+
+        if (eligibleTasks.length === 0) {
+          container.innerHTML = '<p style="opacity: 0.7;">No eligible tasks found. Tasks must have time estimates to be scheduled.</p>';
+          return;
+        }
+
+        // Calculate priority for each task
+        const now = new Date();
+        const tasksWithPriority = eligibleTasks.map(task => {
+          const urgency = calculateTaskUrgency(task, config, allTags, allProjects, tasks, now);
+          return {
+            task,
+            urgency: urgency.total,
+            components: urgency.components
+          };
+        });
+
+        // Sort by priority (highest first)
+        tasksWithPriority.sort((a, b) => b.urgency - a.urgency);
+
+        // Build HTML
+        let html = `<p style="margin-bottom: 12px; font-weight: 500;">${tasksWithPriority.length} tasks sorted by priority:</p>`;
+        
+        for (const item of tasksWithPriority) {
+          const { task, urgency, components } = item;
+          const hours = Math.round((task.timeEstimate || 0) / 3600000 * 10) / 10;
+          
+          // Build display title with parent prefix for subtasks
+          let displayTitle = task.title;
+          if (task.parentId) {
+            const parent = taskMap.get(task.parentId);
+            if (parent) {
+              displayTitle = `${parent.title} > ${task.title}`;
+            }
+          }
+          
+          // Build explanation parts (only show non-zero components)
+          const explanationParts = [];
+          if (components.tag !== 0) explanationParts.push(`tag: ${formatNumber(components.tag)}`);
+          if (components.project !== 0) explanationParts.push(`project: ${formatNumber(components.project)}`);
+          if (components.duration !== 0) explanationParts.push(`duration: ${formatNumber(components.duration)}`);
+          if (components.oldness !== 0) explanationParts.push(`oldness: ${formatNumber(components.oldness)}`);
+          if (components.deadline !== 0) explanationParts.push(`deadline: ${formatNumber(components.deadline)}`);
+          
+          const explanation = explanationParts.length > 0 
+            ? explanationParts.join(' + ') 
+            : 'no priority factors applied';
+          
+          html += `
+            <div class="priority-item">
+              <div class="priority-header">
+                <div class="priority-title">${escapeHtml(displayTitle)}</div>
+                <div class="priority-score">${formatNumber(urgency)}</div>
+              </div>
+              <div class="priority-explanation">${hours}h est. | ${explanation}</div>
+            </div>
+          `;
+        }
+
+        container.innerHTML = html;
+      } catch (e) {
+        console.error('Failed to load priorities:', e);
+        container.innerHTML = `<p style="font-weight: bold;">Error: ${e.message}</p>`;
+      }
+    }
+
+    // Format number for display (1 decimal place, remove trailing zeros)
+    function formatNumber(num) {
+      if (num === 0) return '0';
+      const rounded = Math.round(num * 10) / 10;
+      return rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
+    }
+
+    // Calculate task urgency (mirrors PriorityCalculator.calculateUrgency from core.js)
+    function calculateTaskUrgency(task, config, allTags, allProjects, allTasks, now) {
+      const tagPriority = calculateTagPriority(task, config.tagPriorities || {}, allTags, allTasks);
+      const projectPriority = calculateProjectPriority(task, config.projectPriorities || {}, allProjects);
+      const durationPriority = calculateDurationPriority(task, config.durationFormula || 'none', config.durationWeight ?? 1.0);
+      const oldnessPriority = calculateOldnessPriority(task, config.oldnessFormula || 'none', config.oldnessWeight ?? 1.0, now);
+      const deadlinePriority = calculateDeadlinePriority(task, config.deadlineFormula || 'none', config.deadlineWeight ?? 12.0, now);
+
+      // Apply urgencyWeight to non-deadline factors
+      const urgencyWeight = config.urgencyWeight ?? 1.0;
+      const nonDeadlineUrgency = (tagPriority + projectPriority + durationPriority + oldnessPriority) * urgencyWeight;
+
+      return {
+        total: nonDeadlineUrgency + deadlinePriority,
+        components: {
+          tag: tagPriority * urgencyWeight,
+          project: projectPriority * urgencyWeight,
+          duration: durationPriority * urgencyWeight,
+          oldness: oldnessPriority * urgencyWeight,
+          deadline: deadlinePriority
+        }
+      };
+    }
+
+    // Get effective tag IDs including inherited from parent
+    function getEffectiveTagIds(task, allTasks) {
+      const tagIds = new Set(task.tagIds || []);
+      if (task.parentId && allTasks) {
+        const parent = allTasks.find(t => t.id === task.parentId);
+        if (parent) {
+          const parentTags = getEffectiveTagIds(parent, allTasks);
+          for (const tagId of parentTags) {
+            tagIds.add(tagId);
+          }
+        }
+      }
+      return Array.from(tagIds);
+    }
+
+    // Calculate tag-based priority boost
+    function calculateTagPriority(task, tagPriorities, allTags, allTasks) {
+      const effectiveTagIds = getEffectiveTagIds(task, allTasks);
+      if (effectiveTagIds.length === 0) return 0;
+      if (!tagPriorities || typeof tagPriorities !== 'object') return 0;
+      
+      let boost = 0;
+      for (const tagId of effectiveTagIds) {
+        const tag = allTags.find(t => t.id === tagId);
+        if (tag && tagPriorities[tag.title] !== undefined) {
+          boost += Number(tagPriorities[tag.title]) || 0;
+        }
+      }
+      return boost;
+    }
+
+    // Calculate project-based priority boost
+    function calculateProjectPriority(task, projectPriorities, allProjects) {
+      if (!task.projectId) return 0;
+      if (!projectPriorities || typeof projectPriorities !== 'object') return 0;
+      
+      const project = allProjects.find(p => p.id === task.projectId);
+      if (project && projectPriorities[project.title] !== undefined) {
+        return Number(projectPriorities[project.title]) || 0;
+      }
+      return 0;
+    }
+
+    // Get remaining hours for task
+    function getRemainingHours(task) {
+      const estimated = (task.timeEstimate || 0) / (1000 * 60 * 60);
+      const spent = (task.timeSpent || 0) / (1000 * 60 * 60);
+      return Math.max(0, estimated - spent);
+    }
+
+    // Calculate duration-based priority factor
+    function calculateDurationPriority(task, formula, weight) {
+      const hours = getRemainingHours(task);
+      if (hours <= 0 || formula === 'none') return 0;
+      if (weight <= 0) return 0;
+
+      let factor;
+      switch (formula) {
+        case 'inverse':
+          factor = 1 / (hours + 1);
+          break;
+        case 'log':
+          factor = Math.log(hours + 1);
+          break;
+        case 'linear':
+        default:
+          factor = hours;
+          break;
+      }
+      return factor * weight;
+    }
+
+    // Get task age in days
+    function getTaskAgeInDays(task, now) {
+      if (!task.created) return 0;
+      const created = new Date(task.created);
+      return Math.abs(now - created) / (1000 * 60 * 60 * 24);
+    }
+
+    // Calculate oldness-based priority factor
+    function calculateOldnessPriority(task, formula, weight, now) {
+      const days = getTaskAgeInDays(task, now);
+      if (days <= 0 || formula === 'none') return 0;
+      if (weight <= 0) return 0;
+
+      let factor;
+      switch (formula) {
+        case 'exponential':
+          const cappedDays = Math.min(days, 100);
+          factor = Math.pow(1.1, cappedDays);
+          break;
+        case 'log':
+          factor = Math.log(days + 1);
+          break;
+        case 'linear':
+        default:
+          factor = days;
+          break;
+      }
+      return factor * weight;
+    }
+
+    // Parse deadline from task notes
+    function parseDeadlineFromNotes(notes) {
+      if (!notes || typeof notes !== 'string') return null;
+      
+      const patterns = [
+        /(?:due|deadline)\s*:\s*(\d{4}-\d{2}-\d{2})/i,
+        /(?:due|deadline)\s*:\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i,
+        /(?:due|deadline)\s*:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
+      ];
+      
+      for (const pattern of patterns) {
+        const match = notes.match(pattern);
+        if (match) {
+          const dateStr = match[1];
+          if (dateStr.includes('/')) {
+            const parts = dateStr.split('/');
+            if (parts.length === 3) {
+              const [first, second, year] = parts.map(p => parseInt(p, 10));
+              if (first > 12 && second >= 1 && second <= 12) {
+                return new Date(year, second - 1, first);
+              }
+              if (first >= 1 && first <= 12 && second >= 1 && second <= 31) {
+                return new Date(year, first - 1, second);
+              }
+            }
+          } else {
+            const parsed = new Date(dateStr);
+            if (!isNaN(parsed.getTime())) {
+              return parsed;
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    // Get task due date
+    function getTaskDueDate(task) {
+      const notesDeadline = parseDeadlineFromNotes(task.notes);
+      if (notesDeadline) return notesDeadline;
+      if (task.dueDate) return new Date(task.dueDate);
+      return null;
+    }
+
+    // Calculate deadline-based priority factor
+    function calculateDeadlinePriority(task, formula, weight, now) {
+      if (formula === 'none') return 0;
+      if (weight <= 0) return 0;
+
+      const dueDate = getTaskDueDate(task);
+      if (!dueDate) return 0;
+
+      const daysUntilDue = (dueDate - now) / (1000 * 60 * 60 * 24);
+
+      let factor;
+      switch (formula) {
+        case 'aggressive':
+          if (daysUntilDue <= -7) {
+            factor = 1.0;
+          } else if (daysUntilDue <= 0) {
+            factor = 0.9 + (-daysUntilDue / 7) * 0.1;
+          } else if (daysUntilDue <= 7) {
+            factor = 0.9 - (daysUntilDue / 7) * 0.4;
+          } else if (daysUntilDue <= 14) {
+            factor = 0.5 - ((daysUntilDue - 7) / 7) * 0.3;
+          } else {
+            factor = 0.2;
+          }
+          break;
+        case 'linear':
+        default:
+          if (daysUntilDue <= -7) {
+            factor = 1.0;
+          } else if (daysUntilDue >= 14) {
+            factor = 0.2;
+          } else {
+            factor = 1.0 - ((daysUntilDue + 7) / 21) * 0.8;
+          }
+          break;
+      }
+
+      return factor * weight;
     }
 
     // Initialize
