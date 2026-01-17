@@ -288,8 +288,9 @@ const PriorityCalculator = {
     let boost = 0;
     for (const tagId of effectiveTagIds) {
       const tag = allTags.find(t => t.id === tagId);
-      if (tag && tagPriorities[tag.name] !== undefined) {
-        boost += Number(tagPriorities[tag.name]) || 0;
+      // Super Productivity uses 'title' for tag names, not 'name'
+      if (tag && tagPriorities[tag.title] !== undefined) {
+        boost += Number(tagPriorities[tag.title]) || 0;
       }
     }
     return boost;

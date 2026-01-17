@@ -21,9 +21,9 @@ function createTask(overrides = {}) {
 
 describe('PriorityCalculator.calculateTagPriority', () => {
   const allTags = [
-    { id: 'tag-urgent', name: 'urgent' },
-    { id: 'tag-work', name: 'work' },
-    { id: 'tag-personal', name: 'personal' },
+    { id: 'tag-urgent', title: 'urgent' },
+    { id: 'tag-work', title: 'work' },
+    { id: 'tag-personal', title: 'personal' },
   ];
 
   const tagPriorities = {
@@ -60,7 +60,7 @@ describe('PriorityCalculator.calculateTagPriority', () => {
 
   it('ignores tags not in priority config', () => {
     const task = createTask({ tagIds: ['tag-unknown'] });
-    const unknownTags = [{ id: 'tag-unknown', name: 'unknown' }];
+    const unknownTags = [{ id: 'tag-unknown', title: 'unknown' }];
     expect(PriorityCalculator.calculateTagPriority(task, tagPriorities, unknownTags)).toBe(0);
   });
 
@@ -289,7 +289,7 @@ describe('PriorityCalculator.calculateDeadlinePriority', () => {
 });
 
 describe('PriorityCalculator.calculateUrgency', () => {
-  const allTags = [{ id: 'tag-1', name: 'urgent' }];
+  const allTags = [{ id: 'tag-1', title: 'urgent' }];
   const allProjects = [{ id: 'proj-1', title: 'Work' }];
   const config = {
     tagPriorities: { urgent: 10 },

@@ -182,7 +182,7 @@ describe('AutoPlanner.schedule', () => {
       ...config,
       tagPriorities: { urgent: 100 },
     };
-    const allTagsList = [{ id: 'tag-urgent', name: 'urgent' }];
+    const allTagsList = [{ id: 'tag-urgent', title: 'urgent' }];
 
     const tasks = [
       createTask({ id: 'task-1', title: 'Normal', timeEstimate: 2 * 60 * 60 * 1000 }),
