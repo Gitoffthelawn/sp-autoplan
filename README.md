@@ -20,11 +20,42 @@ self-explained.
 
 ## Features
 
-- ⚡ **Automatic scheduling** based on tags, projects, duration, and age
-- 🔄 **Smart task splitting** into manageable time blocks (default 2 hours)
-- 📅 **Calendar-aware** with configurable work hours and days off
-- 🛡️ **Safe re-running** — automatically merges splits and clears previous schedules
-- 🏷️ **Flexible priorities** through tags and projects instead of numeric fields
+### 🎯 Smart Priority Calculation
+- 🏷️ **Tag-based priorities** — Boost urgency with tags like "urgent" (+20) or reduce with "someday" (-10)
+- 📁 **Project-based priorities** — Give entire projects higher or lower priority
+- ⏳ **Age awareness** — Older tasks gradually rise in priority so nothing gets forgotten
+- ⏱️ **Duration weighting** — Prefer quick wins or tackle big tasks first (your choice!)
+- 📊 **Customizable formulas** — Linear, logarithmic, inverse, or exponential priority curves
+
+### 📅 Deadline Management
+- 📝 **Deadlines in notes** — Write "Due: 2024-01-20" in task notes (no extra fields needed!)
+- 🚨 **Deadline warnings** — Get alerted when tasks can't be completed on time
+- 🔄 **Dynamic rescheduling** — Automatically reprioritizes when deadlines are at risk
+- 📆 **Multiple date formats** — Supports ISO, US, EU, and natural date formats
+
+### ⏰ Flexible Time Maps
+- 🗓️ **Custom work schedules** — Define different work hours for each day of the week
+- 🏢 **Per-project schedules** — Schedule "Work" tasks 9-5, "Personal" tasks evenings only
+- 🏷️ **Per-tag schedules** — Assign tags to specific time windows
+- 🌅 **Multiple time maps** — Create as many schedules as you need
+
+### 🔄 Smart Task Splitting
+- ✂️ **Automatic splitting** — Large tasks become "Task ⟨I⟩", "Task ⟨II⟩", etc.
+- 📐 **Configurable block size** — Default 2 hours, minimum 30 minutes
+- 🔗 **One-click merge** — Consolidate split tasks back together anytime
+- 🎨 **Custom naming** — Add prefixes or disable suffixes as you prefer
+
+### 🛡️ Safe & Reversible
+- ✅ **Dry-run preview** — See exactly what will be scheduled before applying
+- 🔄 **Re-run anytime** — Previous schedules are cleared and rebuilt automatically
+- 📌 **Fixed tasks** — Tag meetings and appointments to prevent rescheduling
+- 📥 **iCal protection** — Imported calendar events are never moved
+
+### ⚡ Easy to Use
+- 🪄 **One-click scheduling** — Just click "Run AutoPlan Now"
+- 💾 **Persistent settings** — Configure once, use forever
+- 🔌 **Native integration** — Works seamlessly with Super Productivity's side panel
+- 📱 **Responsive UI** — Full settings panel or compact side panel view
 
 ## How It Works
 
