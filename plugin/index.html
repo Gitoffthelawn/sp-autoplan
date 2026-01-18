@@ -703,6 +703,14 @@
         </select>
         <p class="help-text">Tasks with this tag will keep their existing schedule and won't be rescheduled. Their time is subtracted from available hours on those days, so other tasks schedule around them.</p>
       </div>
+      
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="treatIcalAsFixed">
+          <label for="treatIcalAsFixed">Treat iCal tasks as fixed</label>
+        </div>
+        <p class="help-text">When enabled, tasks imported from iCal (calendar events) will be treated as fixed and won't be rescheduled. They will be skipped in the priority list.</p>
+      </div>
     </div>
 
     <div class="section">
@@ -1063,6 +1071,7 @@
         workdayHours: 8,
         skipDays: [0, 6], // Sunday and Saturday
         doNotRescheduleTagId: null,
+        treatIcalAsFixed: true,
       };
     }
 
@@ -1092,6 +1101,9 @@
       if (doNotRescheduleSelect && currentConfig.doNotRescheduleTagId) {
         doNotRescheduleSelect.value = currentConfig.doNotRescheduleTagId;
       }
+      
+      // Apply treat iCal as fixed setting
+      document.getElementById('treatIcalAsFixed').checked = currentConfig.treatIcalAsFixed !== false;
 
       updateTagTable();
       updateProjectTable();
@@ -1110,6 +1122,9 @@
 
       // Get do not reschedule tag
       const doNotRescheduleTagId = document.getElementById('doNotRescheduleTag').value || null;
+      
+      // Get treat iCal as fixed setting
+      const treatIcalAsFixed = document.getElementById('treatIcalAsFixed').checked;
 
       return {
         blockSizeMinutes: parseInt(document.getElementById('blockSize').value) || 120,
@@ -1126,6 +1141,7 @@
         tagPriorities: currentConfig.tagPriorities || {},
         projectPriorities: currentConfig.projectPriorities || {},
         doNotRescheduleTagId: doNotRescheduleTagId,
+        treatIcalAsFixed: treatIcalAsFixed,
       };
     }
 
@@ -1748,10 +1764,16 @@
         const splitGroups = new Map(); // originalTaskId -> { originalTitle, splits: [...] }
         const nonSplitTasks = [];
         
+        // Check if iCal tasks should be treated as fixed
+        const treatIcalAsFixed = config.treatIcalAsFixed !== false;
+        
         for (const task of tasks) {
           if (task.isDone) continue;
           if (!task.timeEstimate || task.timeEstimate <= 0) continue;
           if (parentIds.has(task.id)) continue; // Skip parent tasks
+          
+          // Skip iCal tasks if the setting is enabled
+          if (treatIcalAsFixed && task.issueType === 'ICAL') continue;
           
           const splitInfo = parseSplitInfo(task);
           if (splitInfo) {

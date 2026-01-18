@@ -43,6 +43,7 @@ const DEFAULT_CONFIG = {
   workdayHours: 8,
   skipDays: [0, 6], // Days of week to skip (0 = Sunday, 6 = Saturday)
   doNotRescheduleTagId: null, // Tag ID for tasks that should not be rescheduled
+  treatIcalAsFixed: true, // Treat iCal tasks as fixed (don't reschedule)
 };
 
 // ============================================================================
@@ -239,7 +240,17 @@ function hasTag(task, tagId) {
  * @returns {boolean} True if the task should not be rescheduled
  */
 function isFixedTask(task, config) {
-  return hasTag(task, config?.doNotRescheduleTagId);
+  // Check if task has the do-not-reschedule tag
+  if (hasTag(task, config?.doNotRescheduleTagId)) {
+    return true;
+  }
+  
+  // Check if iCal tasks should be treated as fixed
+  if (config?.treatIcalAsFixed !== false && task.issueType === 'ICAL') {
+    return true;
+  }
+  
+  return false;
 }
 
 /**
