@@ -1,7 +1,7 @@
 {
   "id": "autoplan",
   "name": "AutoPlan - Automatic Task Scheduler",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Automatically schedules and prioritizes your tasks based on urgency, tags, duration, and age. Splits tasks into manageable time blocks for optimal productivity.",
   "manifestVersion": 1,
   "minSupVersion": "14.0.0",
@@ -10,5 +10,9 @@
   "icon": "icon.svg",
   "iFrame": true,
   "sidePanel": true,
-  "hooks": ["taskUpdate", "taskComplete", "taskDelete"]
+  "hooks": [
+    "taskUpdate",
+    "taskComplete",
+    "taskDelete"
+  ]
 }
