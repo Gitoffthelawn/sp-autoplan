@@ -22,6 +22,20 @@
 // CONFIGURATION DEFAULTS
 // ============================================================================
 
+// Default time map with standard work hours
+const DEFAULT_TIME_MAP = {
+  name: 'Default',
+  days: {
+    0: null,  // Sunday: skip
+    1: { startHour: 9, endHour: 17 },  // Monday
+    2: { startHour: 9, endHour: 17 },  // Tuesday
+    3: { startHour: 9, endHour: 17 },  // Wednesday
+    4: { startHour: 9, endHour: 17 },  // Thursday
+    5: { startHour: 9, endHour: 17 },  // Friday
+    6: null,  // Saturday: skip
+  }
+};
+
 const DEFAULT_CONFIG = {
   blockSizeMinutes: 120, // 2 hours preferred block size
   minimumBlockSizeMinutes: 30, // 30 minutes minimum block size
@@ -40,12 +54,112 @@ const DEFAULT_CONFIG = {
   autoRunOnStart: false,
   splitPrefix: '', // Prefix for split task names (empty = use original name)
   splitSuffix: true, // Add roman numerals as suffix
+  // Legacy work hours (used as fallback when timeMaps not configured)
   workdayStartHour: 9,
   workdayHours: 8,
   skipDays: [0, 6], // Days of week to skip (0 = Sunday, 6 = Saturday)
+  // Time Maps: per-project and per-tag scheduling windows
+  timeMaps: {
+    'default': DEFAULT_TIME_MAP,
+  },
+  projectTimeMaps: {}, // { projectId: timeMapId }
+  tagTimeMaps: {}, // { tagId: timeMapId } - maps tags to time maps
+  defaultTimeMap: 'default', // Fallback time map for unassigned tasks
   doNotRescheduleTagId: null, // Tag ID for tasks that should not be rescheduled
   treatIcalAsFixed: true, // Treat iCal tasks as fixed (don't reschedule)
 };
+
+/**
+ * Create a default time map from legacy config settings
+ */
+function createTimeMapFromLegacy(config) {
+  const startHour = config.workdayStartHour ?? 9;
+  const hours = config.workdayHours ?? 8;
+  const endHour = startHour + hours;
+  const skipDays = config.skipDays ?? [0, 6];
+  
+  const days = {};
+  for (let day = 0; day < 7; day++) {
+    if (skipDays.includes(day)) {
+      days[day] = null;
+    } else {
+      days[day] = { startHour, endHour };
+    }
+  }
+  
+  return { name: 'Default', days };
+}
+
+/**
+ * Get the time map for a task based on its project and tags
+ * Returns the first matching time map (project takes priority, then tags)
+ */
+function getTimeMapForTask(task, config) {
+  const timeMapIds = getTimeMapIdsForTask(task, config);
+  const timeMapId = timeMapIds.length > 0 ? timeMapIds[0] : (config.defaultTimeMap || 'default');
+  
+  // Get the time map, or create from legacy settings
+  let timeMap = config.timeMaps?.[timeMapId];
+  if (!timeMap) {
+    timeMap = createTimeMapFromLegacy(config);
+  }
+  
+  return timeMap;
+}
+
+/**
+ * Get schedule for a specific day from a time map
+ * @returns {{ startHour: number, endHour: number } | null} - null means skip this day
+ */
+function getDaySchedule(timeMap, dayOfWeek) {
+  return timeMap?.days?.[dayOfWeek] ?? null;
+}
+
+/**
+ * Get the time map ID for a task based on its project and tags
+ * Returns the first matching time map ID (project takes priority, then tags)
+ * @deprecated Use getTimeMapIdsForTask for multi-time-map support
+ */
+function getTimeMapIdForTask(task, config) {
+  const timeMapIds = getTimeMapIdsForTask(task, config);
+  return timeMapIds.length > 0 ? timeMapIds[0] : (config.defaultTimeMap || 'default');
+}
+
+/**
+ * Get all time map IDs for a task based on its project and tags
+ * A task can belong to multiple time maps if it has multiple mapped tags
+ * @param {Object} task - The task to get time maps for
+ * @param {Object} config - Configuration object
+ * @returns {Array<string>} - Array of time map IDs (empty if only default applies)
+ */
+function getTimeMapIdsForTask(task, config) {
+  const timeMapIds = new Set();
+  
+  // Check project mapping first
+  const projectId = task.projectId;
+  if (projectId && config.projectTimeMaps?.[projectId]) {
+    timeMapIds.add(config.projectTimeMaps[projectId]);
+  }
+  
+  // Check tag mappings
+  const tagIds = task.tagIds || [];
+  for (const tagId of tagIds) {
+    if (config.tagTimeMaps?.[tagId]) {
+      timeMapIds.add(config.tagTimeMaps[tagId]);
+    }
+  }
+  
+  return Array.from(timeMapIds);
+}
+
+/**
+ * Get available minutes for a day in a specific time map
+ */
+function getTimeMapDayMinutes(timeMap, dayOfWeek) {
+  const daySchedule = getDaySchedule(timeMap, dayOfWeek);
+  if (!daySchedule) return 0;
+  return (daySchedule.endHour - daySchedule.startHour) * 60;
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -612,7 +726,7 @@ const TaskSplitter = {
 
 const AutoPlanner = {
   /**
-   * Check if a day should be skipped based on config
+   * Check if a day should be skipped based on config (legacy)
    */
   shouldSkipDay(date, skipDays) {
     if (!skipDays || !Array.isArray(skipDays) || skipDays.length === 0) {
@@ -622,7 +736,15 @@ const AutoPlanner = {
   },
 
   /**
-   * Advance to the next working day (skipping configured days)
+   * Check if a day should be skipped for a specific time map
+   */
+  shouldSkipDayForTimeMap(date, timeMap) {
+    const daySchedule = getDaySchedule(timeMap, date.getDay());
+    return daySchedule === null;
+  },
+
+  /**
+   * Advance to the next working day (skipping configured days) - legacy
    */
   advanceToNextWorkday(date, skipDays, workdayStartHour) {
     const newDate = new Date(date);
@@ -633,6 +755,32 @@ const AutoPlanner = {
     let iterations = 0;
     while (this.shouldSkipDay(newDate, skipDays) && iterations < 7) {
       newDate.setDate(newDate.getDate() + 1);
+      iterations++;
+    }
+    
+    return newDate;
+  },
+
+  /**
+   * Advance to the next working day for a specific time map
+   */
+  advanceToNextWorkdayForTimeMap(date, timeMap) {
+    const newDate = new Date(date);
+    newDate.setDate(newDate.getDate() + 1);
+    
+    // Get the start hour for the new day from time map
+    const daySchedule = getDaySchedule(timeMap, newDate.getDay());
+    const startHour = daySchedule?.startHour ?? 9;
+    newDate.setHours(startHour, 0, 0, 0);
+    
+    // Keep advancing while we're on a skip day (max 7 iterations to prevent infinite loop)
+    let iterations = 0;
+    while (this.shouldSkipDayForTimeMap(newDate, timeMap) && iterations < 7) {
+      newDate.setDate(newDate.getDate() + 1);
+      const nextDaySchedule = getDaySchedule(timeMap, newDate.getDay());
+      if (nextDaySchedule) {
+        newDate.setHours(nextDaySchedule.startHour, 0, 0, 0);
+      }
       iterations++;
     }
     
@@ -653,6 +801,30 @@ const AutoPlanner = {
     
     // Calculate minutes since work day started
     return (currentHour - workdayStartHour) * 60 + currentMinute;
+  },
+
+  /**
+   * Get current day minutes for a specific time map
+   */
+  getCurrentDayMinutesForTimeMap(now, timeMap) {
+    const daySchedule = getDaySchedule(timeMap, now.getDay());
+    if (!daySchedule) return 0; // Skip day
+    
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    // If before work start for this time map, return 0
+    if (currentHour < daySchedule.startHour) {
+      return 0;
+    }
+    
+    // If after work end for this time map, return max (day is full)
+    if (currentHour >= daySchedule.endHour) {
+      return (daySchedule.endHour - daySchedule.startHour) * 60;
+    }
+    
+    // Calculate minutes since this time map's work day started
+    return (currentHour - daySchedule.startHour) * 60 + currentMinute;
   },
 
   /**
@@ -803,6 +975,15 @@ const AutoPlanner = {
   },
 
   /**
+   * Calculate the block start time for a specific time map
+   */
+  calculateBlockStartTimeForTimeMap(simulatedTime, currentDayMinutes, timeMap) {
+    const daySchedule = getDaySchedule(timeMap, simulatedTime.getDay());
+    const startHour = daySchedule?.startHour ?? 9;
+    return this.calculateBlockStartTime(simulatedTime, currentDayMinutes, startHour);
+  },
+
+  /**
    * Calculate fixed task minutes per day from a list of fixed tasks
    * Fixed tasks are tasks that have the "do not reschedule" tag and have a scheduled time
    * Only counts the overlap between the fixed task and work hours
@@ -864,7 +1045,10 @@ const AutoPlanner = {
 
   /**
    * Main scheduling algorithm
-   * Assigns time blocks to the most urgent tasks iteratively
+   * For each day, for each time map, sorts tasks by priority and schedules them.
+   * This ensures fair scheduling across time maps - each time map gets its slots filled
+   * with its highest priority tasks each day, rather than one time map dominating.
+   * 
    * @param {Array} splits - Task splits to schedule
    * @param {Object} config - Configuration object
    * @param {Array} allTags - All available tags
@@ -880,137 +1064,198 @@ const AutoPlanner = {
 
     const schedule = [];
     const remainingSplits = [...splits];
-    let simulatedTime = new Date(startTime);
-    
-    const workdayStartHour = config.workdayStartHour ?? 9;
-    const baseMaxMinutesPerDay = (config.workdayHours ?? 8) * 60;
     const maxDaysAhead = config.maxDaysAhead ?? 30;
-    const skipDays = config.skipDays ?? [];
+    const minBlockMinutes = config.minimumBlockSizeMinutes ?? DEFAULT_CONFIG.minimumBlockSizeMinutes;
     
-    // Calculate fixed task minutes per day (with work hours overlap)
+    // Build a map of time maps, ensuring 'default' exists
+    // If legacy settings are present, create a time map from them for 'default'
+    const timeMaps = { ...config.timeMaps };
+    
+    // Check if legacy settings are explicitly configured (different from DEFAULT_CONFIG)
+    const hasLegacyOverrides = (
+      config.workdayStartHour !== undefined ||
+      config.workdayHours !== undefined ||
+      config.skipDays !== undefined
+    );
+    
+    // If legacy overrides exist, create a time map from them (overrides any default from config)
+    if (hasLegacyOverrides || !timeMaps['default']) {
+      timeMaps['default'] = createTimeMapFromLegacy(config);
+    }
+    
+    // Track used minutes per day per time map: { timeMapId: { dateKey: minutes } }
+    const usedMinutesPerDayPerTimeMap = {};
+    for (const timeMapId of Object.keys(timeMaps)) {
+      usedMinutesPerDayPerTimeMap[timeMapId] = {};
+    }
+    
+    // Calculate fixed task minutes per day
     const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks, config);
     
-    // Helper to get available minutes for a specific day
-    const getAvailableMinutesForDay = (date) => {
-      const dateKey = this.getDateKey(date);
-      const fixedMinutes = fixedMinutesPerDay[dateKey] || 0;
-      return Math.max(0, baseMaxMinutesPerDay - fixedMinutes);
+    // Helper to get all time map IDs for a split (can be multiple via tags)
+    const getTimeMapIdsForSplit = (split) => {
+      const ids = getTimeMapIdsForTask(split.originalTask || split, config);
+      // If no specific mappings, use default
+      return ids.length > 0 ? ids : [config.defaultTimeMap || 'default'];
     };
     
-    // Start from current time if during work hours
-    let currentDayMinutes = this.getCurrentDayMinutes(simulatedTime, workdayStartHour);
-    let maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
+    // Group splits by time map ID - a split can appear in multiple time maps
+    const getSplitsForTimeMap = (timeMapId) => {
+      return remainingSplits.filter(split => {
+        const splitTimeMapIds = getTimeMapIdsForSplit(split);
+        return splitTimeMapIds.includes(timeMapId);
+      });
+    };
     
-    // If we're past work hours or current day minutes exceeds max, move to next workday
-    if (currentDayMinutes >= maxMinutesForCurrentDay) {
-      simulatedTime = this.advanceToNextWorkday(simulatedTime, skipDays, workdayStartHour);
-      currentDayMinutes = 0;
-      maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
-    } else if (this.shouldSkipDay(simulatedTime, skipDays)) {
-      // If starting on a skip day, find the next valid workday
-      // We use a temp date set to previous day so advanceToNextWorkday lands on correct day
-      const tempDate = new Date(simulatedTime);
-      tempDate.setDate(tempDate.getDate() - 1);
-      simulatedTime = this.advanceToNextWorkday(tempDate, skipDays, workdayStartHour);
-      currentDayMinutes = 0;
-      maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
-    }
+    // Helper to get available minutes for a day in a time map (excluding fixed tasks)
+    const getAvailableMinutesForDayAndTimeMap = (date, timeMap) => {
+      const dateKey = this.getDateKey(date);
+      const dayOfWeek = date.getDay();
+      const daySchedule = getDaySchedule(timeMap, dayOfWeek);
+      
+      if (!daySchedule) return 0; // Skip day
+      
+      const baseMinutes = (daySchedule.endHour - daySchedule.startHour) * 60;
+      const fixedMinutes = fixedMinutesPerDay[dateKey] || 0;
+      return Math.max(0, baseMinutes - fixedMinutes);
+    };
     
-    const startDate = new Date(simulatedTime);
-    let daysScheduled = 0;
-
-    while (remainingSplits.length > 0 && daysScheduled < maxDaysAhead) {
-      // Calculate urgency for all remaining splits and sort by priority
-      const splitsWithUrgency = remainingSplits.map(split => 
-        this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, simulatedTime, allTasks)
-      );
-      this.sortSplitsByUrgency(splitsWithUrgency);
-
-      // Get the most urgent split
-      const mostUrgent = splitsWithUrgency[0];
-      let blockMinutes = mostUrgent.split.estimatedHours * 60;
-      const minBlockMinutes = config.minimumBlockSizeMinutes ?? DEFAULT_CONFIG.minimumBlockSizeMinutes;
-      const remainingMinutesToday = maxMinutesForCurrentDay - currentDayMinutes;
-
-      // Check if we need to handle day overflow
-      if (blockMinutes > remainingMinutesToday) {
-        // Dynamic splitting: if remaining time today >= minimum block size,
-        // schedule what fits today and create a new split for the remainder
-        if (remainingMinutesToday >= minBlockMinutes) {
-          // Schedule partial block for today, create new split for remainder
-          const remainderMinutes = blockMinutes - remainingMinutesToday;
-          blockMinutes = remainingMinutesToday;
-          
-          // Create a dynamic split for the overflow
-          const newSplit = this.createDynamicSplit(
-            mostUrgent.split, 
-            remainderMinutes, 
-            remainingSplits, 
-            config
-          );
-          
-          // Update the current split's estimated time
-          mostUrgent.split.estimatedHours = blockMinutes / 60;
-          mostUrgent.split.estimatedMs = blockMinutes * 60 * 1000;
-          
-          // Add new split to remainingSplits for future scheduling
-          remainingSplits.push(newSplit);
-        } else {
-          // Not enough time today for minimum block, move to next day
-          simulatedTime = this.advanceToNextWorkday(simulatedTime, skipDays, workdayStartHour);
-          currentDayMinutes = 0;
-          maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
-          daysScheduled = daysBetween(startDate, simulatedTime);
-          
-          if (daysScheduled >= maxDaysAhead) {
-            break; // Stop scheduling if we've exceeded max days
-          }
-          
-          // If the new day has no available time (entirely filled by fixed tasks), skip it
-          // Keep advancing until we find a day with available time or exceed maxDaysAhead
-          while (maxMinutesForCurrentDay < minBlockMinutes && daysScheduled < maxDaysAhead) {
-            simulatedTime = this.advanceToNextWorkday(simulatedTime, skipDays, workdayStartHour);
-            maxMinutesForCurrentDay = getAvailableMinutesForDay(simulatedTime);
-            daysScheduled = daysBetween(startDate, simulatedTime);
-          }
-          
-          if (daysScheduled >= maxDaysAhead) {
-            break;
-          }
-          
-          // Continue to next iteration to re-evaluate with the new day
-          continue;
+    // Helper to get remaining minutes for a day in a time map
+    const getRemainingMinutesForDay = (timeMapId, date, timeMap) => {
+      const dateKey = this.getDateKey(date);
+      const usedMinutes = usedMinutesPerDayPerTimeMap[timeMapId]?.[dateKey] || 0;
+      const availableMinutes = getAvailableMinutesForDayAndTimeMap(date, timeMap);
+      return Math.max(0, availableMinutes - usedMinutes);
+    };
+    
+    // Helper to get used minutes for a day in a time map
+    const getUsedMinutesForDay = (timeMapId, dateKey) => {
+      return usedMinutesPerDayPerTimeMap[timeMapId]?.[dateKey] || 0;
+    };
+    
+    // Helper to add used minutes for a day in a time map
+    const addUsedMinutes = (timeMapId, dateKey, minutes) => {
+      if (!usedMinutesPerDayPerTimeMap[timeMapId]) {
+        usedMinutesPerDayPerTimeMap[timeMapId] = {};
+      }
+      if (!usedMinutesPerDayPerTimeMap[timeMapId][dateKey]) {
+        usedMinutesPerDayPerTimeMap[timeMapId][dateKey] = 0;
+      }
+      usedMinutesPerDayPerTimeMap[timeMapId][dateKey] += minutes;
+    };
+    
+    // Initialize: handle first day specially if we're starting mid-day
+    const startDate = new Date(startTime);
+    startDate.setHours(0, 0, 0, 0);
+    
+    // Pre-calculate used minutes for the first day based on current time
+    const firstDateKey = this.getDateKey(startTime);
+    for (const [timeMapId, timeMap] of Object.entries(timeMaps)) {
+      const daySchedule = getDaySchedule(timeMap, startTime.getDay());
+      if (daySchedule) {
+        const currentMinutes = this.getCurrentDayMinutesForTimeMap(startTime, timeMap);
+        if (currentMinutes > 0) {
+          addUsedMinutes(timeMapId, firstDateKey, currentMinutes);
         }
       }
-
-      // Assign the block
-      const blockStartTime = this.calculateBlockStartTime(simulatedTime, currentDayMinutes, workdayStartHour);
+    }
+    
+    // Iterate day by day
+    let currentDay = new Date(startDate);
+    let daysProcessed = 0;
+    
+    while (remainingSplits.length > 0 && daysProcessed < maxDaysAhead) {
+      const dateKey = this.getDateKey(currentDay);
+      const dayOfWeek = currentDay.getDay();
       
-      const endTime = new Date(blockStartTime);
-      endTime.setMinutes(endTime.getMinutes() + blockMinutes);
-
-      schedule.push({
-        split: mostUrgent.split,
-        startTime: blockStartTime,
-        endTime,
-        urgency: mostUrgent.urgency,
-        urgencyComponents: mostUrgent.urgencyComponents,
-      });
-
-      // Update simulation state
-      currentDayMinutes += blockMinutes;
-
-      // Remove the scheduled split
-      const removeIndex = remainingSplits.findIndex(
-        s => s.originalTaskId === mostUrgent.split.originalTaskId && 
-             s.splitIndex === mostUrgent.split.splitIndex
-      );
-      remainingSplits.splice(removeIndex, 1);
+      // For each time map, schedule tasks for this day
+      for (const [timeMapId, timeMap] of Object.entries(timeMaps)) {
+        const daySchedule = getDaySchedule(timeMap, dayOfWeek);
+        if (!daySchedule) continue; // Skip day for this time map
+        
+        // Get splits that belong to this time map (can include splits with multiple time maps)
+        let timeMapSplits = getSplitsForTimeMap(timeMapId);
+        
+        if (timeMapSplits.length === 0) continue;
+        
+        // Calculate urgency for splits in this time map and sort by priority
+        const splitsWithUrgency = timeMapSplits.map(split => 
+          this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, startTime, allTasks)
+        );
+        this.sortSplitsByUrgency(splitsWithUrgency);
+        
+        // Schedule as many splits as fit in today's available time for this time map
+        let remainingMinutes = getRemainingMinutesForDay(timeMapId, currentDay, timeMap);
+        
+        for (const { split, urgency, urgencyComponents } of splitsWithUrgency) {
+          if (remainingMinutes < minBlockMinutes) break;
+          
+          // Check if this split is still in remainingSplits (might have been scheduled already)
+          const splitIndex = remainingSplits.findIndex(
+            s => s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex
+          );
+          if (splitIndex === -1) continue;
+          
+          let blockMinutes = split.estimatedHours * 60;
+          
+          // Handle case where block is larger than remaining time
+          if (blockMinutes > remainingMinutes) {
+            if (remainingMinutes >= minBlockMinutes) {
+              // Dynamic splitting: schedule what fits, create new split for remainder
+              const remainderMinutes = blockMinutes - remainingMinutes;
+              blockMinutes = remainingMinutes;
+              
+              // Create a dynamic split for the overflow
+              const newSplit = this.createDynamicSplit(
+                split, 
+                remainderMinutes, 
+                remainingSplits, 
+                config
+              );
+              
+              // Update the current split's estimated time
+              split.estimatedHours = blockMinutes / 60;
+              split.estimatedMs = blockMinutes * 60 * 1000;
+              
+              // Add new split to remainingSplits for future scheduling
+              remainingSplits.push(newSplit);
+            } else {
+              // Not enough time for even a partial block, skip to next split
+              continue;
+            }
+          }
+          
+          // Calculate the block start time
+          const usedMinutes = getUsedMinutesForDay(timeMapId, dateKey);
+          const blockStartTime = this.calculateBlockStartTime(currentDay, usedMinutes, daySchedule.startHour);
+          
+          const endTime = new Date(blockStartTime);
+          endTime.setMinutes(endTime.getMinutes() + blockMinutes);
+          
+          schedule.push({
+            split,
+            startTime: blockStartTime,
+            endTime,
+            urgency,
+            urgencyComponents,
+            timeMapId,
+          });
+          
+          // Update used minutes
+          addUsedMinutes(timeMapId, dateKey, blockMinutes);
+          remainingMinutes -= blockMinutes;
+          
+          // Remove the scheduled split from remainingSplits
+          remainingSplits.splice(splitIndex, 1);
+        }
+      }
+      
+      // Move to next day
+      currentDay.setDate(currentDay.getDate() + 1);
+      daysProcessed++;
     }
 
-    // Check for deadline misses: identify tasks that will miss their deadlines
-    // This includes tasks where scheduled completion is after the due date,
-    // and tasks with unscheduled splits that couldn't fit in the scheduling window
+    // Check for deadline misses
     const deadlineMisses = this.checkDeadlineMisses(schedule, splits);
 
     return { schedule, deadlineMisses };
@@ -2084,8 +2329,3 @@ window.AutoPlanAPI = {
 };
 
 console.log('[AutoPlan] Plugin loaded successfully');
-PluginAPI.showSnack({
-  msg: 'AutoPlan plugin loaded. Press Ctrl+Shift+A to open.',
-  type: 'INFO',
-});
-

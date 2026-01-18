@@ -1089,3 +1089,610 @@ describe('AutoPlanner.schedule with dynamic splitting', () => {
     expect(totalMinutes).toBe(600);
   });
 });
+
+describe('AutoPlanner.schedule with time maps', () => {
+  // Helper to create a time map with per-day schedules
+  const createTimeMap = (name, daySchedules) => ({
+    name,
+    days: daySchedules,
+  });
+
+  it('uses default time map when no project assignment', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      timeMaps: {
+        'default': createTimeMap('Default', {
+          0: null, // Sunday skip
+          1: { startHour: 9, endHour: 17 },
+          2: { startHour: 9, endHour: 17 },
+          3: { startHour: 9, endHour: 17 },
+          4: { startHour: 9, endHour: 17 },
+          5: { startHour: 9, endHour: 17 },
+          6: null, // Saturday skip
+        }),
+      },
+      projectTimeMaps: {},
+      skipDays: undefined, // Don't use legacy settings
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'project-1', // Project without time map assignment
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    const startTime = new Date('2024-01-15T09:00:00'); // Monday
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime);
+
+    expect(result.schedule.length).toBe(1);
+    expect(result.schedule[0].startTime.getHours()).toBe(9);
+    expect(result.schedule[0].timeMapId).toBe('default');
+  });
+
+  it('schedules tasks from different projects in their respective time maps', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      timeMaps: {
+        'work': createTimeMap('Work', {
+          0: null,
+          1: { startHour: 9, endHour: 17 },
+          2: { startHour: 9, endHour: 17 },
+          3: { startHour: 9, endHour: 17 },
+          4: { startHour: 9, endHour: 17 },
+          5: { startHour: 9, endHour: 17 },
+          6: null,
+        }),
+        'personal': createTimeMap('Personal', {
+          0: { startHour: 10, endHour: 18 },
+          1: { startHour: 19, endHour: 22 },
+          2: { startHour: 19, endHour: 22 },
+          3: { startHour: 19, endHour: 22 },
+          4: { startHour: 19, endHour: 22 },
+          5: { startHour: 19, endHour: 22 },
+          6: { startHour: 10, endHour: 18 },
+        }),
+      },
+      projectTimeMaps: {
+        'work-project': 'work',
+        'personal-project': 'personal',
+      },
+      defaultTimeMap: 'work',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    const workTask = createTask({
+      id: 'work-task',
+      title: 'Work Task',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'work-project',
+    });
+
+    const personalTask = createTask({
+      id: 'personal-task',
+      title: 'Personal Task',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'personal-project',
+    });
+
+    const workSplits = TaskSplitter.splitTask(workTask, 120, config);
+    const personalSplits = TaskSplitter.splitTask(personalTask, 120, config);
+    const allSplits = [...workSplits, ...personalSplits];
+
+    // Start Monday at 9 AM
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(allSplits, config, [], [], startTime);
+
+    expect(result.schedule.length).toBe(2);
+
+    // Work task should be scheduled at 9:00 (work time map)
+    const workSchedule = result.schedule.find(s => s.split.originalTaskId === 'work-task');
+    expect(workSchedule).toBeDefined();
+    expect(workSchedule.startTime.getHours()).toBe(9);
+    expect(workSchedule.timeMapId).toBe('work');
+
+    // Personal task should be scheduled at 19:00 (personal time map for weekday)
+    const personalSchedule = result.schedule.find(s => s.split.originalTaskId === 'personal-task');
+    expect(personalSchedule).toBeDefined();
+    expect(personalSchedule.startTime.getHours()).toBe(19);
+    expect(personalSchedule.timeMapId).toBe('personal');
+  });
+
+  it('respects per-day skip days in time maps', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      timeMaps: {
+        'weekdays-only': createTimeMap('Weekdays Only', {
+          0: null, // Sunday skip
+          1: { startHour: 9, endHour: 17 },
+          2: { startHour: 9, endHour: 17 },
+          3: { startHour: 9, endHour: 17 },
+          4: { startHour: 9, endHour: 17 },
+          5: { startHour: 9, endHour: 17 },
+          6: null, // Saturday skip
+        }),
+      },
+      defaultTimeMap: 'weekdays-only',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 2 * 60 * 60 * 1000,
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    
+    // Start on Saturday - should skip to Monday
+    const startTime = new Date('2024-01-13T09:00:00'); // Saturday
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime);
+
+    expect(result.schedule.length).toBe(1);
+    // Should be scheduled on Monday (Jan 15)
+    expect(result.schedule[0].startTime.getDate()).toBe(15);
+  });
+
+  it('handles different hours per day in the same time map', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      timeMaps: {
+        'variable': createTimeMap('Variable Hours', {
+          0: { startHour: 10, endHour: 14 }, // Sunday: 4 hours
+          1: { startHour: 9, endHour: 17 },  // Monday: 8 hours
+          2: { startHour: 9, endHour: 17 },  // Tuesday: 8 hours
+          3: { startHour: 9, endHour: 12 },  // Wednesday: 3 hours (half day)
+          4: { startHour: 9, endHour: 17 },  // Thursday: 8 hours
+          5: { startHour: 9, endHour: 15 },  // Friday: 6 hours
+          6: { startHour: 10, endHour: 14 }, // Saturday: 4 hours
+        }),
+      },
+      defaultTimeMap: 'variable',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    // Task that requires more time than Wednesday's 3 hours
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 4 * 60 * 60 * 1000, // 4 hours
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    
+    // Start on Wednesday at 9 AM (only 3 hours available)
+    const startTime = new Date('2024-01-17T09:00:00'); // Wednesday
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime);
+
+    // Should have 3 schedule items due to dynamic splitting:
+    // - 2h block on Wednesday (9-11)
+    // - 1h dynamically split on Wednesday (11-12, filling the day)
+    // - 1h remainder on Thursday
+    expect(result.schedule.length).toBe(3);
+    
+    // First block should be on Wednesday
+    expect(result.schedule[0].startTime.getDate()).toBe(17);
+    expect(result.schedule[0].startTime.getHours()).toBe(9);
+    
+    // Total scheduled should be 4 hours
+    const totalMinutes = result.schedule.reduce(
+      (sum, s) => sum + (s.endTime - s.startTime) / 60000, 0
+    );
+    expect(totalMinutes).toBe(240);
+  });
+
+  it('schedules tasks that span multiple days correctly with time maps', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      timeMaps: {
+        'short-days': createTimeMap('Short Days', {
+          0: null,
+          1: { startHour: 10, endHour: 12 }, // Only 2 hours per day
+          2: { startHour: 10, endHour: 12 },
+          3: { startHour: 10, endHour: 12 },
+          4: { startHour: 10, endHour: 12 },
+          5: { startHour: 10, endHour: 12 },
+          6: null,
+        }),
+      },
+      defaultTimeMap: 'short-days',
+      blockSizeMinutes: 60,
+      minimumBlockSizeMinutes: 60,
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    // 5-hour task with 2-hour days = should span 3 days
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 5 * 60 * 60 * 1000,
+    });
+
+    const splits = TaskSplitter.splitTask(task, 60, config);
+    
+    const startTime = new Date('2024-01-15T10:00:00'); // Monday
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime);
+
+    // Should be scheduled across multiple days
+    const days = new Set(result.schedule.map(s => s.startTime.getDate()));
+    expect(days.size).toBeGreaterThanOrEqual(3);
+
+    // First block of each day should start at 10:00 (time map start hour)
+    // Group blocks by day and check first block of each day
+    const blocksByDay = {};
+    result.schedule.forEach(item => {
+      const day = item.startTime.getDate();
+      if (!blocksByDay[day]) blocksByDay[day] = [];
+      blocksByDay[day].push(item);
+    });
+    
+    Object.values(blocksByDay).forEach(dayBlocks => {
+      // Sort by start time
+      dayBlocks.sort((a, b) => a.startTime - b.startTime);
+      // First block of the day should start at 10:00
+      expect(dayBlocks[0].startTime.getHours()).toBe(10);
+    });
+
+    // Total time should be 5 hours
+    const totalMinutes = result.schedule.reduce(
+      (sum, s) => sum + (s.endTime - s.startTime) / 60000, 0
+    );
+    expect(totalMinutes).toBe(300);
+  });
+
+  it('includes timeMapId in schedule items', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      timeMaps: {
+        'default': createTimeMap('Default', {
+          0: null,
+          1: { startHour: 9, endHour: 17 },
+          2: { startHour: 9, endHour: 17 },
+          3: { startHour: 9, endHour: 17 },
+          4: { startHour: 9, endHour: 17 },
+          5: { startHour: 9, endHour: 17 },
+          6: null,
+        }),
+      },
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 2 * 60 * 60 * 1000,
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime);
+
+    expect(result.schedule.length).toBe(1);
+    expect(result.schedule[0].timeMapId).toBeDefined();
+    expect(result.schedule[0].timeMapId).toBe('default');
+  });
+
+  it('schedules tasks fairly across time maps on the same day', () => {
+    // This test verifies that tasks from different time maps get scheduled
+    // on the same day according to each time map's schedule, not globally sorted by priority
+    const config = {
+      ...DEFAULT_CONFIG,
+      blockSizeMinutes: 60,
+      timeMaps: {
+        'morning': createTimeMap('Morning', {
+          0: null,
+          1: { startHour: 8, endHour: 12 },  // 4 hours in morning
+          2: { startHour: 8, endHour: 12 },
+          3: { startHour: 8, endHour: 12 },
+          4: { startHour: 8, endHour: 12 },
+          5: { startHour: 8, endHour: 12 },
+          6: null,
+        }),
+        'afternoon': createTimeMap('Afternoon', {
+          0: null,
+          1: { startHour: 14, endHour: 18 },  // 4 hours in afternoon
+          2: { startHour: 14, endHour: 18 },
+          3: { startHour: 14, endHour: 18 },
+          4: { startHour: 14, endHour: 18 },
+          5: { startHour: 14, endHour: 18 },
+          6: null,
+        }),
+      },
+      projectTimeMaps: {
+        'morning-project': 'morning',
+        'afternoon-project': 'afternoon',
+      },
+      defaultTimeMap: 'morning',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+      tagPriorities: { 'high': 100, 'low': 0 },
+    };
+
+    const allTags = [
+      { id: 'tag-high', title: 'high' },
+      { id: 'tag-low', title: 'low' },
+    ];
+
+    // Morning project tasks: one high priority, one low priority (2 hours each)
+    const morningHigh = createTask({
+      id: 'morning-high',
+      title: 'Morning High',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'morning-project',
+      tagIds: ['tag-high'],
+    });
+    const morningLow = createTask({
+      id: 'morning-low',
+      title: 'Morning Low',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'morning-project',
+      tagIds: ['tag-low'],
+    });
+
+    // Afternoon project tasks: one high priority, one low priority (2 hours each)
+    const afternoonHigh = createTask({
+      id: 'afternoon-high',
+      title: 'Afternoon High',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'afternoon-project',
+      tagIds: ['tag-high'],
+    });
+    const afternoonLow = createTask({
+      id: 'afternoon-low',
+      title: 'Afternoon Low',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      projectId: 'afternoon-project',
+      tagIds: ['tag-low'],
+    });
+
+    const allTasks = [morningHigh, morningLow, afternoonHigh, afternoonLow];
+    const allSplits = allTasks.flatMap(t => TaskSplitter.splitTask(t, 60, config));
+
+    // Start Monday at 8 AM
+    const startTime = new Date('2024-01-15T08:00:00');
+    const result = AutoPlanner.schedule(allSplits, config, allTags, [], startTime, [], allTasks);
+
+    // Should schedule all 8 splits (2 per task, 4 tasks)
+    expect(result.schedule.length).toBe(8);
+
+    // Group by time map and day
+    const morningDay1 = result.schedule.filter(s => 
+      s.timeMapId === 'morning' && s.startTime.getDate() === 15
+    );
+    const afternoonDay1 = result.schedule.filter(s => 
+      s.timeMapId === 'afternoon' && s.startTime.getDate() === 15
+    );
+
+    // Morning time map has 4 hours on day 1, should schedule 4 x 1-hour blocks
+    expect(morningDay1.length).toBe(4);
+    // First 2 should be high priority (morning-high splits), next 2 low priority
+    expect(morningDay1[0].split.originalTaskId).toBe('morning-high');
+    expect(morningDay1[1].split.originalTaskId).toBe('morning-high');
+    expect(morningDay1[2].split.originalTaskId).toBe('morning-low');
+    expect(morningDay1[3].split.originalTaskId).toBe('morning-low');
+
+    // Afternoon time map has 4 hours on day 1, should schedule 4 x 1-hour blocks
+    expect(afternoonDay1.length).toBe(4);
+    // First 2 should be high priority (afternoon-high splits), next 2 low priority
+    expect(afternoonDay1[0].split.originalTaskId).toBe('afternoon-high');
+    expect(afternoonDay1[1].split.originalTaskId).toBe('afternoon-high');
+    expect(afternoonDay1[2].split.originalTaskId).toBe('afternoon-low');
+    expect(afternoonDay1[3].split.originalTaskId).toBe('afternoon-low');
+
+    // Verify times: morning tasks should be 8:00-12:00, afternoon 14:00-18:00
+    expect(morningDay1[0].startTime.getHours()).toBe(8);
+    expect(morningDay1[3].endTime.getHours()).toBe(12);
+    expect(afternoonDay1[0].startTime.getHours()).toBe(14);
+    expect(afternoonDay1[3].endTime.getHours()).toBe(18);
+  });
+
+  it('schedules tasks based on tag-to-time-map mappings', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      blockSizeMinutes: 60,
+      timeMaps: {
+        'work': createTimeMap('Work', {
+          0: null,
+          1: { startHour: 9, endHour: 12 },
+          2: { startHour: 9, endHour: 12 },
+          3: { startHour: 9, endHour: 12 },
+          4: { startHour: 9, endHour: 12 },
+          5: { startHour: 9, endHour: 12 },
+          6: null,
+        }),
+        'personal': createTimeMap('Personal', {
+          0: null,
+          1: { startHour: 18, endHour: 21 },
+          2: { startHour: 18, endHour: 21 },
+          3: { startHour: 18, endHour: 21 },
+          4: { startHour: 18, endHour: 21 },
+          5: { startHour: 18, endHour: 21 },
+          6: null,
+        }),
+      },
+      tagTimeMaps: {
+        'tag-work': 'work',
+        'tag-personal': 'personal',
+      },
+      defaultTimeMap: 'work',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    // Task with work tag
+    const workTask = createTask({
+      id: 'work-task',
+      title: 'Work Task',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      tagIds: ['tag-work'],
+    });
+
+    // Task with personal tag
+    const personalTask = createTask({
+      id: 'personal-task',
+      title: 'Personal Task',
+      timeEstimate: 2 * 60 * 60 * 1000,
+      tagIds: ['tag-personal'],
+    });
+
+    const allTasks = [workTask, personalTask];
+    const workSplits = TaskSplitter.splitTask(workTask, 60, config);
+    const personalSplits = TaskSplitter.splitTask(personalTask, 60, config);
+    const allSplits = [...workSplits, ...personalSplits];
+
+    // Start Monday at 9 AM
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(allSplits, config, [], [], startTime, [], allTasks);
+
+    expect(result.schedule.length).toBe(4);
+
+    // Work task should be scheduled at 9:00 (work time map)
+    const workSchedule = result.schedule.filter(s => s.split.originalTaskId === 'work-task');
+    expect(workSchedule.length).toBe(2);
+    expect(workSchedule[0].startTime.getHours()).toBe(9);
+    expect(workSchedule[0].timeMapId).toBe('work');
+
+    // Personal task should be scheduled at 18:00 (personal time map)
+    const personalSchedule = result.schedule.filter(s => s.split.originalTaskId === 'personal-task');
+    expect(personalSchedule.length).toBe(2);
+    expect(personalSchedule[0].startTime.getHours()).toBe(18);
+    expect(personalSchedule[0].timeMapId).toBe('personal');
+  });
+
+  it('schedules task with multiple tags in multiple time maps', () => {
+    // A task with both work and personal tags should be schedulable in either time map
+    const config = {
+      ...DEFAULT_CONFIG,
+      blockSizeMinutes: 60,
+      timeMaps: {
+        'morning': createTimeMap('Morning', {
+          0: null,
+          1: { startHour: 9, endHour: 11 },  // 2 hours
+          2: { startHour: 9, endHour: 11 },
+          3: { startHour: 9, endHour: 11 },
+          4: { startHour: 9, endHour: 11 },
+          5: { startHour: 9, endHour: 11 },
+          6: null,
+        }),
+        'evening': createTimeMap('Evening', {
+          0: null,
+          1: { startHour: 18, endHour: 20 },  // 2 hours
+          2: { startHour: 18, endHour: 20 },
+          3: { startHour: 18, endHour: 20 },
+          4: { startHour: 18, endHour: 20 },
+          5: { startHour: 18, endHour: 20 },
+          6: null,
+        }),
+      },
+      tagTimeMaps: {
+        'tag-morning': 'morning',
+        'tag-evening': 'evening',
+      },
+      defaultTimeMap: 'morning',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    // Task with both morning and evening tags - can be scheduled in either
+    const flexibleTask = createTask({
+      id: 'flexible-task',
+      title: 'Flexible Task',
+      timeEstimate: 3 * 60 * 60 * 1000, // 3 hours - more than either slot
+      tagIds: ['tag-morning', 'tag-evening'],
+    });
+
+    const allTasks = [flexibleTask];
+    const splits = TaskSplitter.splitTask(flexibleTask, 60, config);
+
+    // Start Monday at 9 AM
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime, [], allTasks);
+
+    // Should schedule all 3 splits across both time maps on day 1
+    expect(result.schedule.length).toBe(3);
+
+    // Check that both time maps are used
+    const morningSchedule = result.schedule.filter(s => s.timeMapId === 'morning');
+    const eveningSchedule = result.schedule.filter(s => s.timeMapId === 'evening');
+
+    // Morning has 2 hours capacity, evening has 2 hours capacity
+    // 3 hours of work should fit in 2 + 1 or 2 + 2 arrangement
+    expect(morningSchedule.length + eveningSchedule.length).toBe(3);
+    expect(morningSchedule.length).toBeGreaterThan(0);
+    expect(eveningSchedule.length).toBeGreaterThan(0);
+  });
+
+  it('combines project and tag time map mappings', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      blockSizeMinutes: 60,
+      timeMaps: {
+        'work': createTimeMap('Work', {
+          0: null,
+          1: { startHour: 9, endHour: 12 },
+          2: { startHour: 9, endHour: 12 },
+          3: { startHour: 9, endHour: 12 },
+          4: { startHour: 9, endHour: 12 },
+          5: { startHour: 9, endHour: 12 },
+          6: null,
+        }),
+        'urgent': createTimeMap('Urgent', {
+          0: null,
+          1: { startHour: 14, endHour: 17 },
+          2: { startHour: 14, endHour: 17 },
+          3: { startHour: 14, endHour: 17 },
+          4: { startHour: 14, endHour: 17 },
+          5: { startHour: 14, endHour: 17 },
+          6: null,
+        }),
+      },
+      projectTimeMaps: {
+        'work-project': 'work',
+      },
+      tagTimeMaps: {
+        'tag-urgent': 'urgent',
+      },
+      defaultTimeMap: 'work',
+      skipDays: undefined,
+      workdayStartHour: undefined,
+      workdayHours: undefined,
+    };
+
+    // Task in work project with urgent tag - belongs to both time maps
+    const urgentWorkTask = createTask({
+      id: 'urgent-work-task',
+      title: 'Urgent Work Task',
+      timeEstimate: 5 * 60 * 60 * 1000, // 5 hours - more than either slot alone
+      projectId: 'work-project',
+      tagIds: ['tag-urgent'],
+    });
+
+    const allTasks = [urgentWorkTask];
+    const splits = TaskSplitter.splitTask(urgentWorkTask, 60, config);
+
+    // Start Monday at 9 AM
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime, [], allTasks);
+
+    // Should schedule all 5 splits using both work (3h) and urgent (3h) time maps
+    expect(result.schedule.length).toBe(5);
+
+    const workSchedule = result.schedule.filter(s => s.timeMapId === 'work');
+    const urgentSchedule = result.schedule.filter(s => s.timeMapId === 'urgent');
+
+    // Should use both time maps
+    expect(workSchedule.length).toBeGreaterThan(0);
+    expect(urgentSchedule.length).toBeGreaterThan(0);
+  });
+});
