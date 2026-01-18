@@ -436,32 +436,35 @@
     </div>
   </div>
 
-  <!-- Priority List Section (First Screen) -->
-  <div class="section">
-    <div class="section-title">Task Priorities</div>
-    <p class="section-description">
-      Tasks sorted by their computed priority score. Higher priority tasks are scheduled first.
-    </p>
-    
-    <button class="btn" onclick="loadTaskPriorities()">
-      🔄 Refresh Priorities
-    </button>
-
-    <div id="prioritiesList" style="margin-top: 16px;">
-      <div class="loading"><div class="spinner"></div>Loading task priorities...</div>
-    </div>
-  </div>
-
-  <!-- Tabs for Settings -->
+  <!-- Tabs -->
   <div class="tabs">
-    <div class="tab active" data-tab="tags-priorities">Setting tags and priorities</div>
+    <div class="tab active" data-tab="priorities">Task Priorities</div>
+    <div class="tab" data-tab="tags-priorities">Setting tags and priorities</div>
     <div class="tab" data-tab="formulas">Setting formulas</div>
     <div class="tab" data-tab="other-settings">Other settings</div>
     <div class="tab" data-tab="merge">Manage Split Tasks</div>
   </div>
 
+  <!-- Task Priorities Tab (Default/First) -->
+  <div id="tab-priorities" class="tab-content active">
+    <div class="section">
+      <div class="section-title">Task Priorities</div>
+      <p class="section-description">
+        Tasks sorted by their computed priority score. Higher priority tasks are scheduled first.
+      </p>
+      
+      <button class="btn" onclick="loadTaskPriorities()">
+        🔄 Refresh Priorities
+      </button>
+
+      <div id="prioritiesList" style="margin-top: 16px;">
+        <div class="loading"><div class="spinner"></div>Loading task priorities...</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Setting tags and priorities Tab -->
-  <div id="tab-tags-priorities" class="tab-content active">
+  <div id="tab-tags-priorities" class="tab-content">
     <details class="how-it-works">
       <summary style="color: #888;">Show Help</summary>
       <div class="intro-content">
