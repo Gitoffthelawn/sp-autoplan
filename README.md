@@ -72,12 +72,10 @@ This is similar to taskcheck's `--auto-adjust-urgency` feature.
 
 **Super Productivity has no priority field.** AutoPlan rebuilds urgency using tags, projects, task elderliness, deadline, and estimated completion time. Use the dry-run preview to verify the schedule matches your expectations.
 
-**Super Productivity doesn't support scheduling tasks only partially.** AutoPlan splits large tasks into `Task <I>`, `Task <II>`, etc. This means:
+**Super Productivity doesn't support partial scheduling of tasks.** AutoPlan splits large tasks into `Task <I>`, `Task <II>`, etc. This means:
 - Task count changes each run
 - Could conflict with other plugins that manipulate tasks
 - Use the Merge tab to manually consolidate if needed
-
-**Super Conductivity still has primitive calendar integration.** Import calendar events as tasks with a "fixed" tag to protect them from AutoPlan.
 
 **Super Productivity Plugin API are limited.** Especially, they don't expose settings that would be
 useful for improving AutoPlan (working hours, weekdays, boards). This leads to replicate the working
