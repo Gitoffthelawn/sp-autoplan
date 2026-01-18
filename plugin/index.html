@@ -346,7 +346,13 @@
       display: none;
     }
 
-    .tab-content.active {
+    .tab-content.active,
+    div.tab-content.active,
+    #tab-merge.active,
+    #tab-priorities.active,
+    #tab-tags-priorities.active,
+    #tab-formulas.active,
+    #tab-other-settings.active {
       display: block;
     }
 
@@ -647,7 +653,6 @@
     </details>
     
     <div class="section">
-    <div class="section">
       <div class="section-title">Block Settings</div>
       <p class="section-description">Control how tasks are divided into schedulable time blocks.</p>
       
@@ -894,10 +899,29 @@
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
+        console.log('[AutoPlan] Tab clicked:', tab.dataset.tab);
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => {
+          c.classList.remove('active');
+          c.style.display = 'none';
+        });
         tab.classList.add('active');
-        document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+        const tabContent = document.getElementById(`tab-${tab.dataset.tab}`);
+        console.log('[AutoPlan] Tab content element:', tabContent, 'classList before:', tabContent?.classList.toString());
+        if (tabContent) {
+          tabContent.classList.add('active');
+          tabContent.style.display = 'block';
+          console.log('[AutoPlan] Tab content classList after:', tabContent.classList.toString());
+        } else {
+          console.error('[AutoPlan] Tab content not found for:', `tab-${tab.dataset.tab}`);
+        }
+        
+        // Auto-load data for specific tabs
+        if (tab.dataset.tab === 'merge') {
+          loadSplitGroups();
+        } else if (tab.dataset.tab === 'priorities') {
+          loadTaskPriorities();
+        }
       });
     });
 
@@ -1437,27 +1461,72 @@
 
     // Load and display split groups
     async function loadSplitGroups() {
+      console.log('[AutoPlan] loadSplitGroups called');
       const container = document.getElementById('splitGroups');
+      if (!container) {
+        console.error('[AutoPlan] splitGroups container not found');
+        return;
+      }
       container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading split groups...</div>';
 
       try {
+        // Check if PluginAPI is available
+        if (typeof PluginAPI === 'undefined') {
+          container.innerHTML = '<p style="color: #ff6b6b;">PluginAPI not available. Make sure the plugin is properly loaded.</p>';
+          return;
+        }
+        
         // Get all tasks and find split groups
         const tasks = await PluginAPI.getTasks();
+        console.log('[AutoPlan] loadSplitGroups: Found', tasks.length, 'tasks');
         const groups = findSplitGroups(tasks);
+        console.log('[AutoPlan] loadSplitGroups: Found', groups.length, 'split groups');
 
         if (groups.length === 0) {
-          container.innerHTML = '<p style="opacity: 0.7;">No split task groups found</p>';
+          container.innerHTML = '<p style="opacity: 0.7;">No split task groups found. Split tasks are created when AutoPlan breaks a large task into smaller time blocks.</p>';
           return;
         }
 
-        container.innerHTML = groups.map(group => {
+        // Build a map of task ID to task for quick parent lookup
+        const taskMap = new Map();
+        for (const task of tasks) {
+          taskMap.set(task.id, task);
+        }
+        
+        // Helper function to get display title with parent prefix
+        function getDisplayTitle(task) {
+          let title = task.title;
+          if (task.parentId) {
+            const parent = taskMap.get(task.parentId);
+            if (parent) {
+              title = `${parent.title} > ${task.title}`;
+            }
+          }
+          return title;
+        }
+        
+        // Helper function to get original title with parent prefix
+        function getOriginalDisplayTitle(group) {
+          // Find the first split task to check for parent
+          const firstSplit = group.splits[0]?.task;
+          if (firstSplit && firstSplit.parentId) {
+            const parent = taskMap.get(firstSplit.parentId);
+            if (parent) {
+              return `${parent.title} > ${group.originalTitle}`;
+            }
+          }
+          return group.originalTitle;
+        }
+
+        const html = groups.map(group => {
           const incompleteSplits = group.splits.filter(s => !s.task.isDone);
           const completedSplits = group.splits.filter(s => s.task.isDone);
           const totalRemaining = incompleteSplits.reduce((sum, s) => sum + (s.task.timeEstimate || 0), 0);
+          const displayTitle = getOriginalDisplayTitle(group);
           
           return `
             <div class="section" style="margin-bottom: 12px;">
-              <div class="section-title">${escapeHtml(group.originalTitle)}</div>
+              <div class="section-title">${escapeHtml(displayTitle)}</div>
               <div style="display: flex; gap: 16px; margin-bottom: 12px;">
                 <span style="opacity: 0.7;">
                   ${incompleteSplits.length} incomplete / ${completedSplits.length} completed
@@ -1470,7 +1539,7 @@
                 ${group.splits.map(s => `
                   <div class="schedule-item" style="opacity: ${s.task.isDone ? '0.5' : '1'};">
                     <div class="schedule-title">
-                      ${s.task.isDone ? '&#x2713; ' : ''}${escapeHtml(s.task.title)}
+                      ${s.task.isDone ? '&#x2713; ' : ''}${escapeHtml(getDisplayTitle(s.task))}
                     </div>
                     <div class="schedule-urgency">
                       ${Math.round((s.task.timeEstimate || 0) / 3600000)}h
@@ -1490,6 +1559,10 @@
             </div>
           `;
         }).join('');
+        
+        console.log('[AutoPlan] Generated HTML length:', html.length);
+        container.innerHTML = html;
+        console.log('[AutoPlan] Container innerHTML set, children:', container.children.length);
       } catch (e) {
         console.error('Failed to load split groups:', e);
         container.innerHTML = `<p style="font-weight: bold;">Error: ${e.message}</p>`;
