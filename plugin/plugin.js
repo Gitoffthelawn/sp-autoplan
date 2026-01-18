@@ -23,7 +23,8 @@
 // ============================================================================
 
 const DEFAULT_CONFIG = {
-  blockSizeMinutes: 120, // 2 hours default block size
+  blockSizeMinutes: 120, // 2 hours preferred block size
+  minimumBlockSizeMinutes: 30, // 30 minutes minimum block size
   tagPriorities: {}, // { tagName: priorityBoost }
   projectPriorities: {}, // { projectName: priorityBoost }
   durationFormula: 'linear', // 'linear', 'inverse', 'log', 'none'
@@ -928,7 +929,7 @@ const AutoPlanner = {
       // Get the most urgent split
       const mostUrgent = splitsWithUrgency[0];
       let blockMinutes = mostUrgent.split.estimatedHours * 60;
-      const minBlockMinutes = config.blockSizeMinutes ?? DEFAULT_CONFIG.blockSizeMinutes;
+      const minBlockMinutes = config.minimumBlockSizeMinutes ?? DEFAULT_CONFIG.minimumBlockSizeMinutes;
       const remainingMinutesToday = maxMinutesForCurrentDay - currentDayMinutes;
 
       // Check if we need to handle day overflow

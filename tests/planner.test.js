@@ -653,13 +653,17 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
   });
 
   it('pushes tasks to next day when iCal blocks most of the day', () => {
-    // Working hours: 10-17 (7 hours)
+    // Test that blocks don't get scheduled when insufficient time remains
     const testConfig = {
-      ...config,
+      ...DEFAULT_CONFIG,
+      tagPriorities: {},
+      durationFormula: 'none',
+      oldnessFormula: 'none',
       workdayStartHour: 10,
       workdayHours: 7,
       skipDays: [],
       treatIcalAsFixed: true,
+      minimumBlockSizeMinutes: 120, // Require full 2-hour blocks
     };
 
     // Task that needs 4 hours
@@ -912,7 +916,8 @@ describe('AutoPlanner.scheduleWithAutoAdjust', () => {
 describe('AutoPlanner.schedule with dynamic splitting', () => {
   const config = {
     ...DEFAULT_CONFIG,
-    blockSizeMinutes: 120, // 2 hours minimum block size
+    blockSizeMinutes: 120, // 2 hours preferred block size
+    minimumBlockSizeMinutes: 120, // 2 hours minimum block size (for these tests)
     tagPriorities: {},
     durationFormula: 'none',
     oldnessFormula: 'none',

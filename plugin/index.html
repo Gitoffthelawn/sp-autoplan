@@ -804,10 +804,17 @@
       <div class="section-title">Block Settings</div>
       <p class="section-description">Control how tasks are divided into schedulable time blocks.</p>
       
-      <div class="form-group">
-        <label for="blockSize">Block Size (minutes)</label>
-        <input type="number" id="blockSize" min="15" max="480" step="15" value="120">
-        <p class="help-text">Large tasks are split into blocks of this duration. Example: A 6-hour task with 120-minute blocks becomes 3 separate 2-hour blocks that can be scheduled on different days.</p>
+      <div class="row">
+        <div class="form-group">
+          <label for="blockSize">Preferred Block Size (minutes)</label>
+          <input type="number" id="blockSize" min="15" max="480" step="15" value="120">
+          <p class="help-text">Target duration for each scheduled block. Example: A 6-hour task becomes 3 x 2-hour blocks.</p>
+        </div>
+        <div class="form-group">
+          <label for="minBlockSize">Minimum Block Size (minutes)</label>
+          <input type="number" id="minBlockSize" min="5" max="120" step="5" value="30">
+          <p class="help-text">Smallest block allowed. If remaining time in a day is less than this, it's left empty.</p>
+        </div>
       </div>
 
       <div class="row">
@@ -1193,6 +1200,7 @@
     function getDefaultConfig() {
       return {
         blockSizeMinutes: 120,
+        minimumBlockSizeMinutes: 30,
         tagPriorities: {},
         projectPriorities: {},
         durationFormula: 'linear',
@@ -1215,6 +1223,7 @@
     // Apply settings to UI
     function applySettingsToUI() {
       document.getElementById('blockSize').value = currentConfig.blockSizeMinutes || 120;
+      document.getElementById('minBlockSize').value = currentConfig.minimumBlockSizeMinutes || 30;
       document.getElementById('maxDays').value = currentConfig.maxDaysAhead || 30;
       document.getElementById('autoRun').checked = currentConfig.autoRunOnStart || false;
       document.getElementById('splitSuffix').checked = currentConfig.splitSuffix !== false;
@@ -1267,6 +1276,7 @@
 
       return {
         blockSizeMinutes: parseInt(document.getElementById('blockSize').value) || 120,
+        minimumBlockSizeMinutes: parseInt(document.getElementById('minBlockSize').value) || 30,
         maxDaysAhead: parseInt(document.getElementById('maxDays').value) || 30,
         autoRunOnStart: document.getElementById('autoRun').checked,
         splitSuffix: document.getElementById('splitSuffix').checked,
