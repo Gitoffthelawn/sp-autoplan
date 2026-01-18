@@ -804,9 +804,15 @@ const AutoPlanner = {
   /**
    * Calculate fixed task minutes per day from a list of fixed tasks
    * Fixed tasks are tasks that have the "do not reschedule" tag and have a scheduled time
+   * Only counts the overlap between the fixed task and work hours
+   * @param {Array} fixedTasks - List of fixed tasks
+   * @param {Object} config - Configuration with workdayStartHour and workdayHours
    */
-  calculateFixedMinutesPerDay(fixedTasks) {
+  calculateFixedMinutesPerDay(fixedTasks, config = {}) {
     const fixedMinutesPerDay = {};
+    const workdayStartHour = config.workdayStartHour ?? 9;
+    const workdayHours = config.workdayHours ?? 8;
+    const workdayEndHour = workdayStartHour + workdayHours;
     
     for (const task of fixedTasks) {
       // Task needs to have a scheduled time (dueWithTime) and a time estimate
@@ -814,16 +820,42 @@ const AutoPlanner = {
         continue;
       }
       
-      const scheduledDate = new Date(task.dueWithTime);
-      const dateKey = this.getDateKey(scheduledDate);
+      const eventStart = new Date(task.dueWithTime);
+      const eventEndMs = task.dueWithTime + task.timeEstimate;
+      const eventEnd = new Date(eventEndMs);
       
-      // timeEstimate is in milliseconds, convert to minutes
-      const taskMinutes = Math.ceil(task.timeEstimate / 60000);
+      // Calculate overlap with work hours for each day the event spans
+      let currentDay = new Date(eventStart);
+      currentDay.setHours(0, 0, 0, 0);
       
-      if (!fixedMinutesPerDay[dateKey]) {
-        fixedMinutesPerDay[dateKey] = 0;
+      const lastDay = new Date(eventEnd);
+      lastDay.setHours(0, 0, 0, 0);
+      
+      while (currentDay <= lastDay) {
+        const dateKey = this.getDateKey(currentDay);
+        
+        // Work hours for this day
+        const workStart = new Date(currentDay);
+        workStart.setHours(workdayStartHour, 0, 0, 0);
+        const workEnd = new Date(currentDay);
+        workEnd.setHours(workdayEndHour, 0, 0, 0);
+        
+        // Calculate overlap between event and work hours
+        const overlapStart = Math.max(eventStart.getTime(), workStart.getTime());
+        const overlapEnd = Math.min(eventEnd.getTime(), workEnd.getTime());
+        
+        if (overlapEnd > overlapStart) {
+          const overlapMinutes = Math.ceil((overlapEnd - overlapStart) / 60000);
+          
+          if (!fixedMinutesPerDay[dateKey]) {
+            fixedMinutesPerDay[dateKey] = 0;
+          }
+          fixedMinutesPerDay[dateKey] += overlapMinutes;
+        }
+        
+        // Move to next day
+        currentDay.setDate(currentDay.getDate() + 1);
       }
-      fixedMinutesPerDay[dateKey] += taskMinutes;
     }
     
     return fixedMinutesPerDay;
@@ -854,8 +886,8 @@ const AutoPlanner = {
     const maxDaysAhead = config.maxDaysAhead ?? 30;
     const skipDays = config.skipDays ?? [];
     
-    // Calculate fixed task minutes per day
-    const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks);
+    // Calculate fixed task minutes per day (with work hours overlap)
+    const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks, config);
     
     // Helper to get available minutes for a specific day
     const getAvailableMinutesForDay = (date) => {
@@ -1656,6 +1688,84 @@ async function saveConfig(config) {
 }
 
 /**
+ * Simulate merging split tasks without modifying the actual tasks
+ * Returns a task list as it would appear after merging all splits
+ * Also cleans [AutoPlan] markers from all tasks so they can be re-processed
+ * @param {Array} tasks - All tasks
+ * @returns {Array} Tasks with splits replaced by virtual merged tasks
+ */
+function simulateMergedTasks(tasks) {
+  const splitGroups = TaskMerger.findAllSplitGroups(tasks);
+  
+  // Collect all split task IDs
+  const splitTaskIds = new Set();
+  for (const group of splitGroups) {
+    for (const { task } of group.splits) {
+      splitTaskIds.add(task.id);
+    }
+  }
+  
+  // Filter out split tasks and clean [AutoPlan] marker from non-split tasks
+  const nonSplitTasks = tasks
+    .filter(t => !splitTaskIds.has(t.id))
+    .map(t => {
+      // Remove [AutoPlan] marker from notes so the task can be re-processed
+      if (t.notes && t.notes.includes('[AutoPlan]')) {
+        const cleanNotes = t.notes.replace(/\[AutoPlan\][^\n]*/g, '').trim();
+        return { ...t, notes: cleanNotes };
+      }
+      return t;
+    });
+  
+  if (splitGroups.length === 0) {
+    console.log(`[AutoPlan] No split groups to merge, cleaned ${nonSplitTasks.length} tasks`);
+    return nonSplitTasks;
+  }
+  
+  // Create virtual merged tasks
+  const virtualMergedTasks = [];
+  for (const group of splitGroups) {
+    const allSplits = group.splits.map(s => s.task);
+    const incompleteSplits = allSplits.filter(t => !t.isDone);
+    
+    if (incompleteSplits.length === 0) {
+      // All splits are done, skip this group
+      continue;
+    }
+    
+    // Calculate merged data
+    const mergeData = TaskMerger.calculateMergeData(incompleteSplits, allSplits, group.originalTitle);
+    
+    // Use the first incomplete split as the base for the virtual task
+    const baseTask = incompleteSplits[0];
+    
+    // Remove [AutoPlan] marker from notes so the task can be re-processed
+    let cleanNotes = baseTask.notes || '';
+    cleanNotes = cleanNotes.replace(/\[AutoPlan\][^\n]*/g, '').trim();
+    
+    const virtualTask = {
+      ...baseTask,
+      id: group.originalTaskId, // Use original task ID
+      title: mergeData.title,
+      timeEstimate: mergeData.totalTimeEstimate,
+      timeSpent: mergeData.totalTimeSpent,
+      timeSpentOnDay: mergeData.mergedTimeSpentOnDay || {},
+      notes: cleanNotes, // Use cleaned notes without [AutoPlan] marker
+      // Clear planning fields as they would be after merging
+      dueWithTime: undefined,
+      dueDay: undefined,
+      hasPlannedTime: undefined,
+    };
+    
+    virtualMergedTasks.push(virtualTask);
+  }
+  
+  console.log(`[AutoPlan] Simulated merging ${splitGroups.length} split groups into ${virtualMergedTasks.length} virtual tasks`);
+  
+  return [...nonSplitTasks, ...virtualMergedTasks];
+}
+
+/**
  * Run the autoplanning algorithm
  */
 async function runAutoplan(dryRun = false) {
@@ -1663,7 +1773,6 @@ async function runAutoplan(dryRun = false) {
 
   try {
     // Step 1: Clear previous planning (merge splits + clear scheduled times)
-    // Skip this step for dry run since we don't want to modify tasks
     if (!dryRun) {
       console.log('[AutoPlan] Clearing previous planning...');
       const clearResult = await clearPlanning(true); // silent mode - don't show snack
@@ -1673,10 +1782,16 @@ async function runAutoplan(dryRun = false) {
     // Load config
     const config = await loadConfig();
 
-    // Get all tasks, tags, and projects (re-fetch after clearing)
-    const allTasks = await PluginAPI.getTasks();
+    // Get all tasks, tags, and projects (re-fetch after clearing for apply, or fresh for dry run)
+    let allTasks = await PluginAPI.getTasks();
     const allTags = await PluginAPI.getAllTags();
     const allProjects = await PluginAPI.getAllProjects();
+
+    // For dry run, simulate what tasks would look like after merging splits
+    if (dryRun) {
+      console.log('[AutoPlan] Dry run: simulating merged task state...');
+      allTasks = simulateMergedTasks(allTasks);
+    }
 
     console.log(`[AutoPlan] Processing ${allTasks.length} tasks`);
 

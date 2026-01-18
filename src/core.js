@@ -788,9 +788,15 @@ export const AutoPlanner = {
   /**
    * Calculate fixed task minutes per day from a list of fixed tasks
    * Fixed tasks are tasks that have the "do not reschedule" tag and have a scheduled time
+   * Only counts the overlap between the fixed task and work hours
+   * @param {Array} fixedTasks - List of fixed tasks
+   * @param {Object} config - Configuration with workdayStartHour and workdayHours
    */
-  calculateFixedMinutesPerDay(fixedTasks) {
+  calculateFixedMinutesPerDay(fixedTasks, config = {}) {
     const fixedMinutesPerDay = {};
+    const workdayStartHour = config.workdayStartHour ?? 9;
+    const workdayHours = config.workdayHours ?? 8;
+    const workdayEndHour = workdayStartHour + workdayHours;
     
     for (const task of fixedTasks) {
       // Task needs to have a scheduled time (dueWithTime) and a time estimate
@@ -798,16 +804,42 @@ export const AutoPlanner = {
         continue;
       }
       
-      const scheduledDate = new Date(task.dueWithTime);
-      const dateKey = this.getDateKey(scheduledDate);
+      const eventStart = new Date(task.dueWithTime);
+      const eventEndMs = task.dueWithTime + task.timeEstimate;
+      const eventEnd = new Date(eventEndMs);
       
-      // timeEstimate is in milliseconds, convert to minutes
-      const taskMinutes = Math.ceil(task.timeEstimate / 60000);
+      // Calculate overlap with work hours for each day the event spans
+      let currentDay = new Date(eventStart);
+      currentDay.setHours(0, 0, 0, 0);
       
-      if (!fixedMinutesPerDay[dateKey]) {
-        fixedMinutesPerDay[dateKey] = 0;
+      const lastDay = new Date(eventEnd);
+      lastDay.setHours(0, 0, 0, 0);
+      
+      while (currentDay <= lastDay) {
+        const dateKey = this.getDateKey(currentDay);
+        
+        // Work hours for this day
+        const workStart = new Date(currentDay);
+        workStart.setHours(workdayStartHour, 0, 0, 0);
+        const workEnd = new Date(currentDay);
+        workEnd.setHours(workdayEndHour, 0, 0, 0);
+        
+        // Calculate overlap between event and work hours
+        const overlapStart = Math.max(eventStart.getTime(), workStart.getTime());
+        const overlapEnd = Math.min(eventEnd.getTime(), workEnd.getTime());
+        
+        if (overlapEnd > overlapStart) {
+          const overlapMinutes = Math.ceil((overlapEnd - overlapStart) / 60000);
+          
+          if (!fixedMinutesPerDay[dateKey]) {
+            fixedMinutesPerDay[dateKey] = 0;
+          }
+          fixedMinutesPerDay[dateKey] += overlapMinutes;
+        }
+        
+        // Move to next day
+        currentDay.setDate(currentDay.getDate() + 1);
       }
-      fixedMinutesPerDay[dateKey] += taskMinutes;
     }
     
     return fixedMinutesPerDay;
@@ -838,8 +870,8 @@ export const AutoPlanner = {
     const maxDaysAhead = config.maxDaysAhead ?? 30;
     const skipDays = config.skipDays ?? [];
     
-    // Calculate fixed task minutes per day
-    const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks);
+    // Calculate fixed task minutes per day (with work hours overlap)
+    const fixedMinutesPerDay = this.calculateFixedMinutesPerDay(fixedTasks, config);
     
     // Helper to get available minutes for a specific day
     const getAvailableMinutesForDay = (date) => {

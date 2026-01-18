@@ -249,8 +249,22 @@
 
     /* Schedule Preview */
     .schedule-preview {
-      max-height: 400px;
+      max-height: 500px;
       overflow-y: auto;
+    }
+
+    .schedule-day {
+      margin-bottom: 16px;
+    }
+
+    .schedule-day-header {
+      font-weight: 600;
+      padding: 8px 0;
+      border-bottom: 2px solid var(--c-primary, #7c4dff);
+      margin-bottom: 8px;
+      position: sticky;
+      top: 0;
+      background: var(--background-color, #fff);
     }
 
     .schedule-item {
@@ -264,6 +278,13 @@
       border-bottom: none;
     }
 
+    .schedule-time {
+      font-size: 0.85em;
+      font-weight: 500;
+      min-width: 110px;
+      color: var(--c-primary, #7c4dff);
+    }
+
     .schedule-title {
       flex: 1;
       margin-right: 16px;
@@ -275,6 +296,19 @@
       border: 1px solid var(--separator-color);
       border-radius: 10px;
       white-space: nowrap;
+    }
+
+    .schedule-summary {
+      padding: 12px;
+      background: rgba(var(--c-primary-rgb, 124, 77, 255), 0.1);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .schedule-summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
     }
 
     /* Status Messages */
@@ -293,6 +327,73 @@
     .status.warning {
       background: rgba(255, 152, 0, 0.1);
       border-color: #ff9800;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.show {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--background-color, #fff);
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-title {
+      font-weight: 600;
+      font-size: 1.1em;
+      margin-bottom: 16px;
+    }
+
+    .modal-body {
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .modal-body ul {
+      margin: 12px 0;
+      padding-left: 20px;
+    }
+
+    .modal-body li {
+      margin-bottom: 4px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    /* Danger button */
+    .btn-danger {
+      background: #dc3545;
+      border-color: #dc3545;
+      color: #fff;
+      opacity: 0.7;
+    }
+
+    .btn-danger:hover {
+      opacity: 1;
+      background: #c82333;
+      border-color: #bd2130;
     }
 
     /* Loading */
@@ -442,6 +543,14 @@
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-title">Clear Planning</div>
+    
+    <button class="btn btn-danger" onclick="showClearPlanningModal()">
+      Clear All Planning
+    </button>
+  </div>
+
   <!-- Tabs -->
   <div class="tabs">
     <div class="tab active" data-tab="priorities">Task Priorities</div>
@@ -460,11 +569,21 @@
       </p>
       
       <button class="btn" onclick="loadTaskPriorities()">
-        🔄 Refresh Priorities
+        Refresh Priorities
       </button>
 
       <div id="prioritiesList" style="margin-top: 16px;">
         <div class="loading"><div class="spinner"></div>Loading task priorities...</div>
+      </div>
+    </div>
+    
+    <div class="section" id="schedulePreviewSection" style="display: none;">
+      <div class="section-title">Schedule Preview</div>
+      <p class="section-description">
+        Preview of what tasks would be scheduled and when. Click "Dry Run" to generate this preview.
+      </p>
+      <div id="schedulePreview">
+        <!-- Schedule preview will be populated here -->
       </div>
     </div>
   </div>
@@ -786,11 +905,6 @@
           <li><strong>Completed splits</strong> are deleted (their work is already done)</li>
         </ul>
         <p>Use this when you want to reschedule a task differently, or if you finished the work faster than expected.</p>
-        <p><strong>What happens when you "Clear All Planning":</strong></p>
-        <ul>
-          <li>All split tasks (e.g., "Task &lt;I&gt;", "Task &lt;II&gt;") are merged back into single tasks</li>
-          <li>Scheduled times are removed from tasks with time estimates (except those with "Do Not Reschedule" tag)</li>
-        </ul>
       </div>
     </details>
     
@@ -807,17 +921,6 @@
       <div id="splitGroups" style="margin-top: 16px;">
         <p style="opacity: 0.7;">Click "Refresh Split Groups" to load split task groups.</p>
       </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Clear Planning</div>
-      <p class="section-description">
-        Merge all split tasks back together and remove scheduled times, without rescheduling.
-      </p>
-      
-      <button class="btn" onclick="handleClearPlanning()">
-        Clear All Planning
-      </button>
     </div>
   </div>
 
@@ -838,6 +941,9 @@
           const result = await window.parent.AutoPlanAPI.runAutoplan(true);
           const schedule = result.schedule || [];
           showStatus(`Dry Run complete: ${schedule.length} blocks would be scheduled`, 'info');
+          
+          // Display the schedule preview
+          displaySchedulePreview(schedule);
         } else {
           // AutoPlanAPI not available
           showStatus('AutoPlanAPI not available. Use the header button or Ctrl+Shift+A to run.', 'info');
@@ -1444,12 +1550,22 @@
       }
     }
 
-    // Clear planning from all eligible tasks
-    async function handleClearPlanning() {
-      if (!confirm('Are you sure you want to clear all planning?\n\nThis will:\n1. Merge all split tasks back together\n2. Remove scheduled times from tasks with time estimates\n\n(Tasks with "Do Not Reschedule" tag are not affected)')) {
-        return;
-      }
+    // Show the clear planning confirmation modal
+    function showClearPlanningModal() {
+      document.getElementById('clearPlanningModal').classList.add('show');
+    }
 
+    // Hide the clear planning confirmation modal
+    function hideClearPlanningModal(event) {
+      // If called from overlay click, only hide if clicking the overlay itself
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('clearPlanningModal').classList.remove('show');
+    }
+
+    // Confirm and execute clear planning
+    async function confirmClearPlanning() {
+      hideClearPlanningModal();
+      
       try {
         // Try to communicate with plugin.js
         if (window.parent && window.parent.AutoPlanAPI) {
@@ -1465,6 +1581,9 @@
             message = 'No tasks to clear';
           }
           showStatus(message, 'success');
+          
+          // Refresh the priority list if we're on that tab
+          await loadTaskPriorities();
         } else {
           // Fallback: Show instructions
           showStatus('AutoPlanAPI not available. Make sure the plugin is properly loaded.', 'error');
@@ -1902,6 +2021,112 @@
       return rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
     }
 
+    // Display schedule preview from dry run results
+    function displaySchedulePreview(schedule) {
+      const section = document.getElementById('schedulePreviewSection');
+      const container = document.getElementById('schedulePreview');
+      
+      if (!schedule || schedule.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+      
+      // Show the section
+      section.style.display = 'block';
+      
+      // Group schedule by day
+      const dayGroups = new Map(); // dateString -> items[]
+      let totalMinutes = 0;
+      const uniqueTasks = new Set();
+      
+      for (const item of schedule) {
+        const dateStr = item.startTime.toLocaleDateString('en-US', { 
+          weekday: 'short', 
+          month: 'short', 
+          day: 'numeric' 
+        });
+        
+        if (!dayGroups.has(dateStr)) {
+          dayGroups.set(dateStr, []);
+        }
+        dayGroups.get(dateStr).push(item);
+        
+        // Track stats
+        const durationMs = item.endTime - item.startTime;
+        totalMinutes += durationMs / 60000;
+        uniqueTasks.add(item.split.originalTaskId);
+      }
+      
+      // Build summary
+      const totalHours = Math.round(totalMinutes / 6) / 10; // Round to 1 decimal
+      const daysCount = dayGroups.size;
+      const firstDay = schedule[0].startTime.toLocaleDateString();
+      const lastDay = schedule[schedule.length - 1].startTime.toLocaleDateString();
+      
+      let html = `
+        <div class="schedule-summary">
+          <div class="schedule-summary-row">
+            <span>Total blocks:</span>
+            <strong>${schedule.length}</strong>
+          </div>
+          <div class="schedule-summary-row">
+            <span>Total time:</span>
+            <strong>${totalHours} hours</strong>
+          </div>
+          <div class="schedule-summary-row">
+            <span>Unique tasks:</span>
+            <strong>${uniqueTasks.size}</strong>
+          </div>
+          <div class="schedule-summary-row">
+            <span>Date range:</span>
+            <strong>${firstDay} - ${lastDay} (${daysCount} days)</strong>
+          </div>
+        </div>
+        <div class="schedule-preview">
+      `;
+      
+      // Build day-by-day schedule
+      for (const [dateStr, items] of dayGroups) {
+        html += `
+          <div class="schedule-day">
+            <div class="schedule-day-header">${dateStr}</div>
+        `;
+        
+        for (const item of items) {
+          const startTimeStr = item.startTime.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: true 
+          });
+          const endTimeStr = item.endTime.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: true 
+          });
+          
+          // Get task title (use original title for splits)
+          const title = item.split.originalTitle || item.split.title || 'Untitled';
+          const splitLabel = item.split.splitIndex > 0 ? ` [${item.split.splitIndex + 1}/${item.split.totalSplits || '?'}]` : '';
+          
+          html += `
+            <div class="schedule-item">
+              <span class="schedule-time">${startTimeStr} - ${endTimeStr}</span>
+              <span class="schedule-title">${escapeHtml(title)}${splitLabel}</span>
+              <span class="schedule-urgency" title="Priority score">${formatNumber(item.urgency)}</span>
+            </div>
+          `;
+        }
+        
+        html += '</div>'; // close schedule-day
+      }
+      
+      html += '</div>'; // close schedule-preview
+      container.innerHTML = html;
+      
+      // Scroll the section into view
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     // Compare initial priority order with scheduled order to detect discrepancies
     async function calculatePriorityComparison(schedule) {
       const warnings = [];
@@ -2239,5 +2464,24 @@
       loadSettings();
     }
   </script>
+
+  <!-- Clear Planning Confirmation Modal -->
+  <div id="clearPlanningModal" class="modal-overlay" onclick="hideClearPlanningModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">Clear All Planning?</div>
+      <div class="modal-body">
+        <p>This will:</p>
+        <ul>
+          <li>Merge all split tasks back together</li>
+          <li>Remove scheduled times from tasks with time estimates</li>
+        </ul>
+        <p><strong>Note:</strong> Tasks with "Do Not Reschedule" tag are not affected.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="hideClearPlanningModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmClearPlanning()">Clear Planning</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

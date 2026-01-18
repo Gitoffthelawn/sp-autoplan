@@ -612,6 +612,85 @@ describe('AutoPlanner.schedule with fixed tasks', () => {
     const jan17Blocks = result.schedule.filter(s => s.startTime.getDate() === 17);
     expect(jan17Blocks.length).toBe(2);
   });
+
+  it('handles iCal events as fixed tasks blocking time', () => {
+    // Working hours: 10-17 (7 hours)
+    const testConfig = {
+      ...config,
+      workdayStartHour: 10,
+      workdayHours: 7,
+      skipDays: [],
+      treatIcalAsFixed: true,
+    };
+
+    // Task that needs 4 hours (2 blocks of 2 hours)
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 4 * 60 * 60 * 1000, // 4 hours
+    });
+
+    // iCal event lasting 6 hours from 14:00-20:00 on Jan 15
+    // This blocks 14:00-17:00 (3 hours) of the workday
+    const fixedTasks = [{
+      id: 'ical-1',
+      issueType: 'ICAL',
+      dueWithTime: new Date('2024-01-15T14:00:00').getTime(),
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+    }];
+
+    const splits = TaskSplitter.splitTask(task, 120, testConfig); // 2 blocks of 2 hours
+    expect(splits.length).toBe(2);
+
+    const startTime = new Date('2024-01-15T10:00:00'); // Monday 10 AM
+    const result = AutoPlanner.schedule(splits, testConfig, [], [], startTime, fixedTasks);
+
+    expect(result.schedule.length).toBe(2);
+
+    // Jan 15 has 7h workday (10-17) minus 3h blocked (14-17) = 4h available
+    // So both 2-hour blocks should fit on Jan 15
+    const jan15Blocks = result.schedule.filter(s => s.startTime.getDate() === 15);
+    expect(jan15Blocks.length).toBe(2);
+  });
+
+  it('pushes tasks to next day when iCal blocks most of the day', () => {
+    // Working hours: 10-17 (7 hours)
+    const testConfig = {
+      ...config,
+      workdayStartHour: 10,
+      workdayHours: 7,
+      skipDays: [],
+      treatIcalAsFixed: true,
+    };
+
+    // Task that needs 4 hours
+    const task = createTask({
+      id: 'task-1',
+      timeEstimate: 4 * 60 * 60 * 1000, // 4 hours
+    });
+
+    // iCal event lasting 6 hours from 11:00-17:00 on Jan 15
+    // This blocks 6 hours of the 7-hour workday, leaving only 1 hour
+    const fixedTasks = [{
+      id: 'ical-1',
+      issueType: 'ICAL',
+      dueWithTime: new Date('2024-01-15T11:00:00').getTime(),
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+    }];
+
+    const splits = TaskSplitter.splitTask(task, 120, testConfig); // 2 blocks of 2 hours
+    const startTime = new Date('2024-01-15T10:00:00');
+    const result = AutoPlanner.schedule(splits, testConfig, [], [], startTime, fixedTasks);
+
+    expect(result.schedule.length).toBe(2);
+
+    // Jan 15 only has 1 hour available, not enough for 2-hour blocks
+    // Both blocks should go to Jan 16
+    const jan15Blocks = result.schedule.filter(s => s.startTime.getDate() === 15);
+    expect(jan15Blocks.length).toBe(0);
+
+    const jan16Blocks = result.schedule.filter(s => s.startTime.getDate() === 16);
+    expect(jan16Blocks.length).toBe(2);
+  });
 });
 
 describe('AutoPlanner.schedule with deadlines', () => {
