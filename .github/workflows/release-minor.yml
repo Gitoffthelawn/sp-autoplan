@@ -38,6 +38,16 @@ jobs:
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "New version: $NEW_VERSION"
       
+      - name: Update manifest.json version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('plugin/manifest.json', 'utf8'));
+            manifest.version = '${{ steps.new_version.outputs.version }}';
+            fs.writeFileSync('plugin/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          "
+          echo "Updated manifest.json to version ${{ steps.new_version.outputs.version }}"
+      
       - name: Build plugin zip
         run: npm run build:zip
       
@@ -45,7 +55,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
+          git add package.json plugin/manifest.json
           if [ -f package-lock.json ]; then git add package-lock.json; fi
           git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }}"
           git push
