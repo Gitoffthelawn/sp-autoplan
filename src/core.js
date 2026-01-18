@@ -1091,11 +1091,13 @@ export const AutoPlanner = {
   },
 
   /**
-   * Schedule with automatic urgency adjustment
-   * If tasks miss their deadlines, reduce the urgency weight and retry
-   * until all deadlines are met or the weight reaches 0.
+   * Schedule with automatic urgency adjustment.
+   * If tasks miss their deadlines, reduce the non-deadline urgency weight
+   * and increase the deadline weight, then retry until all deadlines are met
+   * or the weight reaches the limits.
    * 
-   * This implements taskcheck's auto-adjust-urgency feature.
+   * This implements a dynamic scheduling approach where deadline priority
+   * becomes increasingly important when there's not enough time for everything.
    * 
    * @param {Array} splits - Task splits to schedule
    * @param {Object} config - Configuration object
@@ -1104,32 +1106,40 @@ export const AutoPlanner = {
    * @param {Date} startTime - When to start scheduling from
    * @param {Array} fixedTasks - Tasks that should not be rescheduled (optional)
    * @param {Array} allTasks - All tasks (needed for parent tag inheritance)
-   * @returns {Object} - { schedule, deadlineMisses, finalUrgencyWeight, adjustmentAttempts }
+   * @returns {Object} - { schedule, deadlineMisses, finalUrgencyWeight, finalDeadlineWeight, adjustmentAttempts }
    */
   scheduleWithAutoAdjust(splits, config, allTags, allProjects = [], startTime = new Date(), fixedTasks = [], allTasks = []) {
     const autoAdjust = config.autoAdjustUrgency ?? true;
-    const initialWeight = config.urgencyWeight ?? 1.0;
+    const initialUrgencyWeight = config.urgencyWeight ?? 1.0;
+    const initialDeadlineWeight = config.deadlineWeight ?? 12.0;
     
     if (!autoAdjust) {
       // No auto-adjust, just run once
       const result = this.schedule(splits, config, allTags, allProjects, startTime, fixedTasks, allTasks);
       return {
         ...result,
-        finalUrgencyWeight: initialWeight,
+        finalUrgencyWeight: initialUrgencyWeight,
+        finalDeadlineWeight: initialDeadlineWeight,
         adjustmentAttempts: 0,
       };
     }
     
-    let currentWeight = initialWeight;
+    let currentUrgencyWeight = initialUrgencyWeight;
+    let currentDeadlineWeight = initialDeadlineWeight;
     let attempts = 0;
     let result;
     
-    // Keep trying with reduced weight until no deadline misses or weight reaches 0
-    while (currentWeight >= 0) {
-      // Create a modified config with current weight
+    // Calculate the deadline weight increase step (proportional to urgency decrease)
+    // When urgency goes from 1.0 to 0.0, deadline weight doubles
+    const deadlineWeightStep = (initialDeadlineWeight * URGENCY_WEIGHT_STEP) / initialUrgencyWeight;
+    
+    // Keep trying with adjusted weights until no deadline misses or limits reached
+    while (currentUrgencyWeight >= 0) {
+      // Create a modified config with current weights
       const adjustedConfig = {
         ...config,
-        urgencyWeight: currentWeight,
+        urgencyWeight: currentUrgencyWeight,
+        deadlineWeight: currentDeadlineWeight,
       };
       
       result = this.schedule(splits, adjustedConfig, allTags, allProjects, startTime, fixedTasks, allTasks);
@@ -1139,15 +1149,20 @@ export const AutoPlanner = {
         break;
       }
       
-      // Reduce weight by the step amount and try again
-      currentWeight = Math.round((currentWeight - URGENCY_WEIGHT_STEP) * 10) / 10; // Round to avoid floating point issues
+      // Adjust weights: decrease urgency, increase deadline
+      currentUrgencyWeight = Math.round((currentUrgencyWeight - URGENCY_WEIGHT_STEP) * 10) / 10;
+      currentDeadlineWeight = Math.round((currentDeadlineWeight + deadlineWeightStep) * 10) / 10;
       attempts++;
       
-      // Safety check - don't go below 0
-      if (currentWeight < 0) {
-        currentWeight = 0;
-        // One final try with weight = 0
-        const finalConfig = { ...config, urgencyWeight: 0 };
+      // Safety check - don't go below 0 for urgency weight
+      if (currentUrgencyWeight < 0) {
+        currentUrgencyWeight = 0;
+        // One final try with urgency weight = 0 and maximum deadline weight
+        const finalConfig = { 
+          ...config, 
+          urgencyWeight: 0,
+          deadlineWeight: currentDeadlineWeight,
+        };
         result = this.schedule(splits, finalConfig, allTags, allProjects, startTime, fixedTasks, allTasks);
         break;
       }
@@ -1155,7 +1170,8 @@ export const AutoPlanner = {
     
     return {
       ...result,
-      finalUrgencyWeight: currentWeight,
+      finalUrgencyWeight: currentUrgencyWeight,
+      finalDeadlineWeight: currentDeadlineWeight,
       adjustmentAttempts: attempts,
     };
   },

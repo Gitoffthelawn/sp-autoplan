@@ -677,7 +677,8 @@
         <p>These formulas add bonus priority based on task characteristics. The weight controls how much influence each factor has on the final priority score.</p>
         <p><strong>Duration Priority:</strong> Should shorter or longer tasks be prioritized?</p>
         <p><strong>Oldness Priority:</strong> Should older tasks be prioritized to prevent them from being forgotten?</p>
-        <p><strong>Total Formula:</strong> Total Priority = Tag Boosts + Project Boosts + Duration Factor + Oldness Factor</p>
+        <p><strong>Deadline Priority:</strong> Should tasks with approaching deadlines be prioritized? This uses the task's due date.</p>
+        <p><strong>Total Formula:</strong> Total Priority = Tag Boosts + Project Boosts + Duration Factor + Oldness Factor + Deadline Factor</p>
       </div>
     </details>
     
@@ -738,10 +739,37 @@
     </div>
 
     <div class="section">
+      <div class="section-title">Deadline Priority Formula</div>
+      <p class="section-description">
+        Should tasks with approaching deadlines be prioritized? Tasks with due dates will get higher priority as their deadline approaches.
+      </p>
+      
+      <div class="row">
+        <div class="form-group">
+          <label for="deadlineFormula">Formula Type</label>
+          <select id="deadlineFormula">
+            <option value="none">None (deadlines don't affect priority)</option>
+            <option value="linear">Linear - steady increase as deadline approaches</option>
+            <option value="aggressive">Aggressive - sharp increase near deadline</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="deadlineWeight">Weight (0-20)</label>
+          <input type="number" id="deadlineWeight" min="0" max="20" step="0.5" value="12.0">
+          <p class="help-text">Higher = stronger effect. Default is 12.0.</p>
+        </div>
+      </div>
+
+      <div class="formula-preview" id="deadlinePreview">
+        Deadline Priority = linear(days_until_due) * 12.0
+      </div>
+    </div>
+
+    <div class="section">
       <div class="section-title">Total Priority Formula</div>
       <p class="section-description">The final priority score combines all factors:</p>
       <div class="formula-preview">
-        Total Priority = Tag Boosts + Project Boosts + Duration Factor + Oldness Factor
+        Total Priority = Tag Boosts + Project Boosts + Duration Factor + Oldness Factor + Deadline Factor
       </div>
       <p class="help-text" style="margin-top: 8px;">
         Tasks with higher total priority get scheduled first.
@@ -1170,6 +1198,8 @@
         durationWeight: 1.0,
         oldnessFormula: 'linear',
         oldnessWeight: 1.0,
+        deadlineFormula: 'linear',
+        deadlineWeight: 12.0,
         maxDaysAhead: 30,
         autoRunOnStart: false,
         splitSuffix: true,
@@ -1192,6 +1222,8 @@
       document.getElementById('durationWeight').value = currentConfig.durationWeight || 1.0;
       document.getElementById('oldnessFormula').value = currentConfig.oldnessFormula || 'linear';
       document.getElementById('oldnessWeight').value = currentConfig.oldnessWeight || 1.0;
+      document.getElementById('deadlineFormula').value = currentConfig.deadlineFormula || 'linear';
+      document.getElementById('deadlineWeight').value = currentConfig.deadlineWeight ?? 12.0;
 
       document.getElementById('workdayStartHour').value = currentConfig.workdayStartHour ?? 9;
       document.getElementById('workdayHours').value = currentConfig.workdayHours ?? 8;
@@ -1241,6 +1273,8 @@
         durationWeight: parseFloat(document.getElementById('durationWeight').value) || 1.0,
         oldnessFormula: document.getElementById('oldnessFormula').value,
         oldnessWeight: parseFloat(document.getElementById('oldnessWeight').value) || 1.0,
+        deadlineFormula: document.getElementById('deadlineFormula').value,
+        deadlineWeight: parseFloat(document.getElementById('deadlineWeight').value) ?? 12.0,
         workdayStartHour: parseInt(document.getElementById('workdayStartHour').value) || 9,
         workdayHours: parseInt(document.getElementById('workdayHours').value) || 8,
         skipDays: skipDays,
@@ -1404,6 +1438,8 @@
       const durationWeight = document.getElementById('durationWeight').value;
       const oldnessFormula = document.getElementById('oldnessFormula').value;
       const oldnessWeight = document.getElementById('oldnessWeight').value;
+      const deadlineFormula = document.getElementById('deadlineFormula').value;
+      const deadlineWeight = document.getElementById('deadlineWeight').value;
 
       const durationFns = {
         none: 'disabled',
@@ -1419,14 +1455,22 @@
         exponential: '1.1^days'
       };
 
+      const deadlineFns = {
+        none: 'disabled',
+        linear: 'linear(days_until_due)',
+        aggressive: 'aggressive(days_until_due)'
+      };
+
       document.getElementById('durationPreview').textContent = 
         `Duration Priority = ${durationFns[durationFormula]} * ${durationWeight}`;
       document.getElementById('oldnessPreview').textContent = 
         `Oldness Priority = ${oldnessFns[oldnessFormula]} * ${oldnessWeight}`;
+      document.getElementById('deadlinePreview').textContent = 
+        `Deadline Priority = ${deadlineFns[deadlineFormula]} * ${deadlineWeight}`;
     }
 
     // Add event listeners for formula preview
-    ['durationFormula', 'durationWeight', 'oldnessFormula', 'oldnessWeight'].forEach(id => {
+    ['durationFormula', 'durationWeight', 'oldnessFormula', 'oldnessWeight', 'deadlineFormula', 'deadlineWeight'].forEach(id => {
       document.getElementById(id).addEventListener('change', updateFormulaPreview);
     });
 
@@ -2250,7 +2294,7 @@
       const projectPriority = calculateProjectPriority(task, config.projectPriorities || {}, allProjects);
       const durationPriority = calculateDurationPriority(task, config.durationFormula || 'none', config.durationWeight ?? 1.0);
       const oldnessPriority = calculateOldnessPriority(task, config.oldnessFormula || 'none', config.oldnessWeight ?? 1.0, now);
-      const deadlinePriority = calculateDeadlinePriority(task, config.deadlineFormula || 'none', config.deadlineWeight ?? 12.0, now);
+      const deadlinePriority = calculateDeadlinePriority(task, config.deadlineFormula || 'linear', config.deadlineWeight ?? 12.0, now);
 
       // Apply urgencyWeight to non-deadline factors
       const urgencyWeight = config.urgencyWeight ?? 1.0;
