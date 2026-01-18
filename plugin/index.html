@@ -1744,28 +1744,78 @@
           taskMap.set(task.id, task);
         }
         
-        // Filter to eligible tasks:
-        // - not done
-        // - has time estimate
-        // - is NOT a parent task (exclude tasks that have subtasks)
-        const eligibleTasks = tasks.filter(t => 
-          !t.isDone && 
-          t.timeEstimate && 
-          t.timeEstimate > 0 &&
-          !parentIds.has(t.id)
-        );
+        // Group split tasks by their original task ID
+        const splitGroups = new Map(); // originalTaskId -> { originalTitle, splits: [...] }
+        const nonSplitTasks = [];
+        
+        for (const task of tasks) {
+          if (task.isDone) continue;
+          if (!task.timeEstimate || task.timeEstimate <= 0) continue;
+          if (parentIds.has(task.id)) continue; // Skip parent tasks
+          
+          const splitInfo = parseSplitInfo(task);
+          if (splitInfo) {
+            // This is a split task - group it
+            if (!splitGroups.has(splitInfo.originalTaskId)) {
+              splitGroups.set(splitInfo.originalTaskId, {
+                originalTaskId: splitInfo.originalTaskId,
+                originalTitle: splitInfo.originalTitle,
+                splits: [],
+                // Use the first split's properties for priority calculation
+                representativeTask: task
+              });
+            }
+            splitGroups.get(splitInfo.originalTaskId).splits.push(task);
+          } else {
+            // Regular task (not a split)
+            nonSplitTasks.push(task);
+          }
+        }
+        
+        // Build the list of tasks to display (original tasks with combined durations)
+        const displayTasks = [];
+        
+        // Add non-split tasks as-is
+        for (const task of nonSplitTasks) {
+          displayTasks.push({
+            task,
+            displayTitle: task.title,
+            totalEstimate: task.timeEstimate || 0,
+            isSplitGroup: false
+          });
+        }
+        
+        // Add split groups as consolidated original tasks
+        for (const group of splitGroups.values()) {
+          // Sum up time estimates from all incomplete splits
+          const totalEstimate = group.splits.reduce((sum, t) => sum + (t.timeEstimate || 0), 0);
+          
+          // Create a virtual task representing the original
+          displayTasks.push({
+            task: group.representativeTask, // Use for priority calculation
+            displayTitle: group.originalTitle,
+            totalEstimate,
+            isSplitGroup: true,
+            splitCount: group.splits.length
+          });
+        }
 
-        if (eligibleTasks.length === 0) {
+        if (displayTasks.length === 0) {
           container.innerHTML = '<p style="opacity: 0.7;">No eligible tasks found. Tasks must have time estimates to be scheduled.</p>';
           return;
         }
 
         // Calculate priority for each task
         const now = new Date();
-        const tasksWithPriority = eligibleTasks.map(task => {
-          const urgency = calculateTaskUrgency(task, config, allTags, allProjects, tasks, now);
+        const tasksWithPriority = displayTasks.map(item => {
+          // Create a virtual task with the correct total time estimate for priority calculation
+          const taskForCalculation = {
+            ...item.task,
+            timeEstimate: item.totalEstimate
+          };
+          const urgency = calculateTaskUrgency(taskForCalculation, config, allTags, allProjects, tasks, now);
           return {
-            task,
+            ...item,
             urgency: urgency.total,
             components: urgency.components
           };
@@ -1778,15 +1828,15 @@
         let html = `<p style="margin-bottom: 12px; font-weight: 500;">${tasksWithPriority.length} tasks sorted by priority:</p>`;
         
         for (const item of tasksWithPriority) {
-          const { task, urgency, components } = item;
-          const hours = Math.round((task.timeEstimate || 0) / 3600000 * 10) / 10;
+          const { task, displayTitle, totalEstimate, urgency, components, isSplitGroup, splitCount } = item;
+          const hours = Math.round(totalEstimate / 3600000 * 10) / 10;
           
           // Build display title with parent prefix for subtasks
-          let displayTitle = task.title;
+          let fullDisplayTitle = displayTitle;
           if (task.parentId) {
             const parent = taskMap.get(task.parentId);
             if (parent) {
-              displayTitle = `${parent.title} > ${task.title}`;
+              fullDisplayTitle = `${parent.title} > ${displayTitle}`;
             }
           }
           
@@ -1802,10 +1852,13 @@
             ? explanationParts.join(' + ') 
             : 'no priority factors applied';
           
+          // Add split indicator if this is a consolidated split group
+          const splitIndicator = isSplitGroup ? ` (${splitCount} splits)` : '';
+          
           html += `
             <div class="priority-item">
               <div class="priority-header">
-                <div class="priority-title">${escapeHtml(displayTitle)}</div>
+                <div class="priority-title">${escapeHtml(fullDisplayTitle)}${splitIndicator}</div>
                 <div class="priority-score">${formatNumber(urgency)}</div>
               </div>
               <div class="priority-explanation">${hours}h est. | ${explanation}</div>
