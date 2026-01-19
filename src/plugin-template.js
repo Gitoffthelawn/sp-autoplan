@@ -172,14 +172,40 @@ TaskMerger.mergeSplits = async function(taskId, silent = false) {
     return null;
   }
 
+  // Handle single orphan split - clean it up and restore original title
   if (splits.length === 1) {
+    const orphanSplit = splits[0];
+    
+    // If it's done, nothing to do
+    if (orphanSplit.isDone) {
+      if (!silent) {
+        PluginAPI.showSnack({
+          msg: 'Split is already completed',
+          type: 'INFO',
+        });
+      }
+      return null;
+    }
+    
+    // Clean up the orphan split: restore original title and remove [AutoPlan] markers
+    const cleanedNotes = this.cleanAutoplanNotes(orphanSplit.notes);
+    await PluginAPI.updateTask(orphanSplit.id, {
+      title: originalTitle,
+      notes: cleanedNotes,
+    });
+    
     if (!silent) {
       PluginAPI.showSnack({
-        msg: 'Only one split remaining, nothing to merge',
-        type: 'INFO',
+        msg: `Restored "${originalTitle}" from orphan split`,
+        type: 'SUCCESS',
       });
     }
-    return null;
+    
+    return {
+      mergedTaskId: orphanSplit.id,
+      mergedCount: 1,
+      totalTimeEstimate: orphanSplit.timeEstimate,
+    };
   }
 
   // Calculate total remaining time from incomplete splits
@@ -348,19 +374,52 @@ function simulateMergedTasks(tasks) {
       continue;
     }
     
+    // Handle single orphan split - create virtual task with restored original title
+    // This matches the new mergeSplits behavior that cleans up orphan splits
+    if (allSplits.length === 1) {
+      const orphanSplit = allSplits[0];
+      if (orphanSplit.isDone) {
+        continue;
+      }
+      
+      // Remove [AutoPlan] marker from notes so the task can be re-processed
+      let cleanNotes = orphanSplit.notes || '';
+      cleanNotes = cleanNotes.replace(/\[AutoPlan\][^\n]*/g, '').trim();
+      
+      const virtualTask = {
+        ...orphanSplit,
+        id: orphanSplit.id,
+        title: group.originalTitle, // Restore original title
+        notes: cleanNotes,
+        // Clear planning fields as they would be after merging
+        dueWithTime: undefined,
+        dueDay: undefined,
+        hasPlannedTime: undefined,
+      };
+      
+      virtualMergedTasks.push(virtualTask);
+      continue;
+    }
+    
     // Calculate merged data
     const mergeData = TaskMerger.calculateMergeData(incompleteSplits, allSplits, group.originalTitle);
     
-    // Use the first incomplete split as the base for the virtual task
-    const baseTask = incompleteSplits[0];
+    // Match the logic from TaskMerger.mergeSplits:
+    // Prefer using the original task (if still incomplete), otherwise use first incomplete split
+    // This ensures dry run produces the same result as actual apply
+    let mergedTask = incompleteSplits.find(s => s.id === group.originalTaskId);
+    if (!mergedTask) {
+      // Original task was completed - use first incomplete split (same as mergeSplits does)
+      mergedTask = incompleteSplits[0];
+    }
     
     // Remove [AutoPlan] marker from notes so the task can be re-processed
-    let cleanNotes = baseTask.notes || '';
+    let cleanNotes = mergedTask.notes || '';
     cleanNotes = cleanNotes.replace(/\[AutoPlan\][^\n]*/g, '').trim();
     
     const virtualTask = {
-      ...baseTask,
-      id: group.originalTaskId, // Use original task ID
+      ...mergedTask,
+      id: mergedTask.id, // Use the actual merged task's ID (matches mergeSplits behavior)
       title: mergeData.title,
       timeEstimate: mergeData.totalTimeEstimate,
       timeSpent: mergeData.totalTimeSpent,

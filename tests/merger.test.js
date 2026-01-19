@@ -427,4 +427,108 @@ describe('TaskMerger.findAllSplitGroups', () => {
     const groups = TaskMerger.findAllSplitGroups([]);
     expect(groups).toHaveLength(0);
   });
+
+  it('identifies orphan splits (single remaining split in a group)', () => {
+    // Simulate case where first split was completed and deleted,
+    // leaving only the second split as an orphan
+    const tasks = [
+      createSplitTask('orig-deleted', 'Orphan Task', 1, 2, { id: 'orphan-split' }),
+      createSplitTask('orig-1', 'Task A', 0, 2, { id: 'a-1' }),
+      createSplitTask('orig-1', 'Task A', 1, 2, { id: 'a-2' }),
+    ];
+
+    const groups = TaskMerger.findAllSplitGroups(tasks);
+
+    expect(groups).toHaveLength(2);
+
+    // Find the orphan group
+    const orphanGroup = groups.find(g => g.originalTaskId === 'orig-deleted');
+    expect(orphanGroup).toBeDefined();
+    expect(orphanGroup.splits).toHaveLength(1);
+    expect(orphanGroup.splits[0].task.id).toBe('orphan-split');
+    expect(orphanGroup.originalTitle).toBe('Orphan Task');
+
+    // Normal group should still have both splits
+    const normalGroup = groups.find(g => g.originalTaskId === 'orig-1');
+    expect(normalGroup.splits).toHaveLength(2);
+  });
+
+  it('identifies orphan split where original task ID no longer exists', () => {
+    // Real-world case: task "Adattare articolo AI & musica" was split into 2,
+    // first split (original) was completed and deleted, second split remains
+    const orphanTask = createTask({
+      id: 'STzC8azgg5baH_nDPmT6S',
+      title: 'Adattare articolo AI & musica <II>',
+      notes: 'Deadline: 2026-01-21\n\n[AutoPlan] Split 2/2 of "Adattare articolo AI & musica"\n\n[AutoPlan] Original Task ID: spqBAqiIJH28Hd5Re8eYZ',
+      timeEstimate: 7200000,
+      isDone: false,
+    });
+
+    const tasks = [orphanTask];
+    const groups = TaskMerger.findAllSplitGroups(tasks);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].originalTaskId).toBe('spqBAqiIJH28Hd5Re8eYZ');
+    expect(groups[0].originalTitle).toBe('Adattare articolo AI & musica');
+    expect(groups[0].splits).toHaveLength(1);
+    expect(groups[0].splits[0].task.id).toBe('STzC8azgg5baH_nDPmT6S');
+    expect(groups[0].splits[0].splitInfo.splitIndex).toBe(1); // 0-indexed, so split 2/2 is index 1
+  });
+});
+
+describe('Orphan split detection helpers', () => {
+  it('can detect if a split group is an orphan (single split remaining)', () => {
+    const tasks = [
+      createSplitTask('orphan-orig', 'Orphan Task', 1, 2, { id: 'orphan' }),
+      createSplitTask('normal-orig', 'Normal Task', 0, 3, { id: 'n-1' }),
+      createSplitTask('normal-orig', 'Normal Task', 1, 3, { id: 'n-2' }),
+      createSplitTask('normal-orig', 'Normal Task', 2, 3, { id: 'n-3' }),
+    ];
+
+    const groups = TaskMerger.findAllSplitGroups(tasks);
+    
+    // Helper function to detect orphan groups
+    const isOrphanGroup = (group) => group.splits.length === 1;
+    
+    const orphanGroups = groups.filter(isOrphanGroup);
+    const normalGroups = groups.filter(g => !isOrphanGroup(g));
+
+    expect(orphanGroups).toHaveLength(1);
+    expect(orphanGroups[0].originalTitle).toBe('Orphan Task');
+    
+    expect(normalGroups).toHaveLength(1);
+    expect(normalGroups[0].originalTitle).toBe('Normal Task');
+  });
+
+  it('orphan split retains user notes after AutoPlan markers are cleaned', () => {
+    const orphanTask = createTask({
+      id: 'orphan-1',
+      title: 'My Task <II>',
+      notes: 'Deadline: 2026-01-21\n\n[AutoPlan] Split 2/2 of "My Task"\n\n[AutoPlan] Original Task ID: orig-deleted',
+      timeEstimate: 3600000,
+    });
+
+    // Clean the notes as mergeSplits would do
+    const cleanedNotes = TaskMerger.cleanAutoplanNotes(orphanTask.notes);
+    
+    expect(cleanedNotes).toBe('Deadline: 2026-01-21');
+    expect(cleanedNotes).not.toContain('[AutoPlan]');
+    expect(cleanedNotes).not.toContain('Original Task ID');
+  });
+
+  it('parseSplitInfo extracts original title for restoration', () => {
+    const orphanTask = createTask({
+      id: 'orphan-1',
+      title: 'My Important Task <II>',
+      notes: '[AutoPlan] Split 2/2 of "My Important Task"\n\n[AutoPlan] Original Task ID: orig-deleted',
+    });
+
+    const splitInfo = TaskMerger.parseSplitInfo(orphanTask);
+    
+    expect(splitInfo).not.toBeNull();
+    expect(splitInfo.originalTitle).toBe('My Important Task');
+    expect(splitInfo.splitIndex).toBe(1); // 2/2 -> index 1
+    expect(splitInfo.totalSplits).toBe(2);
+    expect(splitInfo.originalTaskId).toBe('orig-deleted');
+  });
 });
