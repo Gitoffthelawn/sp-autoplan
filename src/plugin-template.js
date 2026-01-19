@@ -739,9 +739,3 @@ window.AutoPlanAPI = {
   mergeSplits: (taskId) => TaskMerger.mergeSplits(taskId),
   findAllSplitGroups: () => TaskMerger.findAllSplitGroupsAsync(),
 };
-
-console.log('[AutoPlan] Plugin loaded successfully');
-PluginAPI.showSnack({
-  msg: 'AutoPlan plugin loaded. Press Ctrl+Shift+A to open.',
-  type: 'INFO',
-});
