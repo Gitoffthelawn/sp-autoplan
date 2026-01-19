@@ -1162,23 +1162,46 @@ export const AutoPlanner = {
         
         if (timeMapSplits.length === 0) continue;
         
-        // Calculate urgency for splits in this time map and sort by priority
-        const splitsWithUrgency = timeMapSplits.map(split => 
-          this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, startTime, allTasks)
-        );
-        this.sortSplitsByUrgency(splitsWithUrgency);
-        
         // Schedule as many splits as fit in today's available time for this time map
         let remainingMinutes = getRemainingMinutesForDay(timeMapId, currentDay, timeMap);
         
-        for (const { split, urgency, urgencyComponents } of splitsWithUrgency) {
-          if (remainingMinutes < minBlockMinutes) break;
+        // Keep scheduling until we run out of time or splits for this time map
+        while (remainingMinutes >= minBlockMinutes && timeMapSplits.length > 0) {
+          // Calculate the current scheduling time based on used minutes
+          const usedMinutes = getUsedMinutesForDay(timeMapId, dateKey);
+          const currentSchedulingTime = this.calculateBlockStartTime(currentDay, usedMinutes, daySchedule.startHour);
           
-          // Check if this split is still in remainingSplits (might have been scheduled already)
+          // Calculate urgency for all remaining splits at the current scheduling time
+          // This ensures deadline and oldness urgency reflect when the task would actually start
+          const splitsWithUrgency = timeMapSplits
+            .filter(split => {
+              // Only consider splits still in remainingSplits
+              return remainingSplits.some(
+                s => s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex
+              );
+            })
+            .map(split => 
+              this.calculateSplitUrgency(split, remainingSplits, config, allTags, allProjects, currentSchedulingTime, allTasks)
+            );
+          
+          if (splitsWithUrgency.length === 0) break;
+          
+          this.sortSplitsByUrgency(splitsWithUrgency);
+          
+          // Get the most urgent split
+          const { split, urgency, urgencyComponents } = splitsWithUrgency[0];
+          
+          // Find it in remainingSplits
           const splitIndex = remainingSplits.findIndex(
             s => s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex
           );
-          if (splitIndex === -1) continue;
+          if (splitIndex === -1) {
+            // Split was already scheduled, remove from timeMapSplits and continue
+            timeMapSplits = timeMapSplits.filter(
+              s => !(s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex)
+            );
+            continue;
+          }
           
           let blockMinutes = split.estimatedHours * 60;
           
@@ -1204,14 +1227,16 @@ export const AutoPlanner = {
               // Add new split to remainingSplits for future scheduling
               remainingSplits.push(newSplit);
             } else {
-              // Not enough time for even a partial block, skip to next split
+              // Not enough time for even a partial block, remove from timeMapSplits and continue
+              timeMapSplits = timeMapSplits.filter(
+                s => !(s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex)
+              );
               continue;
             }
           }
           
-          // Calculate the block start time
-          const usedMinutes = getUsedMinutesForDay(timeMapId, dateKey);
-          const blockStartTime = this.calculateBlockStartTime(currentDay, usedMinutes, daySchedule.startHour);
+          // Use currentSchedulingTime as the block start time (already calculated above)
+          const blockStartTime = currentSchedulingTime;
           
           const endTime = new Date(blockStartTime);
           endTime.setMinutes(endTime.getMinutes() + blockMinutes);
@@ -1229,8 +1254,11 @@ export const AutoPlanner = {
           addUsedMinutes(timeMapId, dateKey, blockMinutes);
           remainingMinutes -= blockMinutes;
           
-          // Remove the scheduled split from remainingSplits
+          // Remove the scheduled split from remainingSplits and timeMapSplits
           remainingSplits.splice(splitIndex, 1);
+          timeMapSplits = timeMapSplits.filter(
+            s => !(s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex)
+          );
         }
       }
       
