@@ -521,35 +521,40 @@ async function runAutoplan(dryRun = false) {
     }
 
     if (dryRun) {
-      PluginAPI.showSnack({
-        msg: `[Dry Run] ${message}`,
-        type: 'INFO',
-      });
-      return { schedule, applied: false };
+      return { schedule, applied: false, deadlineMisses };
     }
 
     // Apply the schedule
     const result = await AutoPlanner.applySchedule(schedule, eligibleTasks);
 
-    // Check for errors and adjust message accordingly
+    // Show snack notification with summary
     if (result.errors && result.errors.length > 0) {
       PluginAPI.showSnack({
-        msg: `${message} (${result.errors.length} errors)`,
+        msg: `AutoPlan completed with ${result.errors.length} error(s)`,
         type: 'WARNING',
+      });
+    } else if (schedule.length > 0) {
+      // Count unique tasks and total hours
+      const uniqueTasks = new Set(schedule.map(s => s.split.originalTaskId)).size;
+      const totalMs = schedule.reduce((sum, s) => sum + s.split.estimatedMs, 0);
+      const totalHours = (totalMs / 3600000).toFixed(1);
+      PluginAPI.showSnack({
+        msg: `Scheduled ${uniqueTasks} task${uniqueTasks !== 1 ? 's' : ''} (${totalHours}h)`,
+        type: 'SUCCESS',
       });
     } else {
       PluginAPI.showSnack({
-        msg: message,
-        type: 'SUCCESS',
+        msg: 'No tasks to schedule',
+        type: 'INFO',
       });
     }
 
-    return { schedule, applied: true, result };
+    return { schedule, applied: true, result, deadlineMisses };
 
   } catch (error) {
     console.error('[AutoPlan] Error:', error);
     PluginAPI.showSnack({
-      msg: `AutoPlan error: ${error.message}`,
+      msg: `AutoPlan failed: ${error.message}`,
       type: 'ERROR',
     });
     throw error;

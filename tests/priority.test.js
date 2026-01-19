@@ -268,7 +268,7 @@ describe('PriorityCalculator.calculateDeadlinePriority', () => {
 
   it('parses deadline from notes field', () => {
     const now = new Date('2024-01-15');
-    const task = createTask({ notes: 'Due: 2024-01-20' });
+    const task = createTask({ notes: 'Deadline: 2024-01-20' });
     const result = PriorityCalculator.calculateDeadlinePriority(task, 'linear', 12, now);
     expect(result).toBeGreaterThan(0);
   });

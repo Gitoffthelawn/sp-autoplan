@@ -261,19 +261,24 @@ function parseDeadlineFromNotes(notes) {
   if (!notes || typeof notes !== 'string') return null;
   
   // Match patterns like "Due: <date>" or "Deadline: <date>"
+  // Now also supports time like "Deadline: 2024-01-20 9.15" or "Deadline: 2024-01-20 9:15"
   const patterns = [
-    // ISO format: Due: 2024-01-20 or Deadline: 2024-01-20
-    /(?:due|deadline)\s*:\s*(\d{4}-\d{2}-\d{2})/i,
-    // Named month: Due: Jan 20, 2024
-    /(?:due|deadline)\s*:\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i,
-    // Slash format: Due: 01/20/2024 or 20/01/2024
-    /(?:due|deadline)\s*:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
+    // ISO format with optional time: Deadline: 2024-01-20 or Deadline: 2024-01-20 9.15
+    /(?:deadline)\s*:\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2})[.:](\d{2}))?/i,
+    // Named month with optional time: Deadline: Jan 20, 2024 9.15
+    /(?:deadline)\s*:\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})(?:\s+(\d{1,2})[.:](\d{2}))?/i,
+    // Slash format with optional time: Deadline: 01/20/2024 9.15
+    /(?:deadline)\s*:\s*(\d{1,2}\/\d{1,2}\/\d{4})(?:\s+(\d{1,2})[.:](\d{2}))?/i,
   ];
   
   for (const pattern of patterns) {
     const match = notes.match(pattern);
     if (match) {
       const dateStr = match[1];
+      const hours = match[2] ? parseInt(match[2], 10) : null;
+      const minutes = match[3] ? parseInt(match[3], 10) : null;
+      
+      let date = null;
       
       // Try parsing the date
       // Handle slash format specially (assume MM/DD/YYYY for US format)
@@ -284,20 +289,26 @@ function parseDeadlineFromNotes(notes) {
           // Validate the parsed values
           if (first > 12 && second >= 1 && second <= 12) {
             // DD/MM/YYYY format (day > 12 indicates it's the day)
-            return new Date(year, second - 1, first);
+            date = new Date(year, second - 1, first);
+          } else if (first >= 1 && first <= 12 && second >= 1 && second <= 31) {
+            // MM/DD/YYYY format - validate day is reasonable
+            date = new Date(year, first - 1, second);
           }
-          // MM/DD/YYYY format - validate day is reasonable
-          if (first >= 1 && first <= 12 && second >= 1 && second <= 31) {
-            return new Date(year, first - 1, second);
-          }
-          // Invalid date parts, continue to next pattern
         }
       } else {
         // Standard date parsing for other formats
         const parsed = new Date(dateStr);
         if (!isNaN(parsed.getTime())) {
-          return parsed;
+          date = parsed;
         }
+      }
+      
+      // If we successfully parsed a date, add time if present
+      if (date) {
+        if (hours !== null && minutes !== null) {
+          date.setHours(hours, minutes, 0, 0);
+        }
+        return date;
       }
     }
   }
@@ -319,16 +330,42 @@ function getTaskDueDate(task) {
   // separately from the scheduled time (which uses dueWithTime in SP)
   const notesDeadline = parseDeadlineFromNotes(task.notes);
   if (notesDeadline) {
-    return notesDeadline;
+    return ensureDeadlineTime(notesDeadline);
   }
   
   // Super Productivity's dueDate is for all-day due dates
   // Note: We don't use dueWithTime here because AutoPlan uses it for scheduling
   if (task.dueDate) {
-    return new Date(task.dueDate);
+    return ensureDeadlineTime(new Date(task.dueDate));
   }
   
   return null;
+}
+
+/**
+ * Ensure a deadline date has a time component
+ * If the time is midnight (00:00:00), assume it's a date-only deadline
+ * and set it to 23:59:59 (end of day)
+ * Checks both local time and UTC time to handle dates parsed from ISO strings
+ * @param {Date} date - The date to check
+ * @returns {Date} - The date with time set to 23:59:59 if it was midnight
+ */
+function ensureDeadlineTime(date) {
+  if (!date) return date;
+  
+  // Check if time is midnight in local time (00:00:00)
+  const isLocalMidnight = date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0;
+  
+  // Check if time is midnight in UTC (for dates parsed from ISO strings like "2024-01-25")
+  const isUTCMidnight = date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0;
+  
+  if (isLocalMidnight || isUTCMidnight) {
+    const adjusted = new Date(date);
+    adjusted.setHours(23, 59, 59, 999);
+    return adjusted;
+  }
+  
+  return date;
 }
 
 /**
@@ -2196,35 +2233,40 @@ async function runAutoplan(dryRun = false) {
     }
 
     if (dryRun) {
-      PluginAPI.showSnack({
-        msg: `[Dry Run] ${message}`,
-        type: 'INFO',
-      });
-      return { schedule, applied: false };
+      return { schedule, applied: false, deadlineMisses };
     }
 
     // Apply the schedule
     const result = await AutoPlanner.applySchedule(schedule, eligibleTasks);
 
-    // Check for errors and adjust message accordingly
+    // Show snack notification with summary
     if (result.errors && result.errors.length > 0) {
       PluginAPI.showSnack({
-        msg: `${message} (${result.errors.length} errors)`,
+        msg: `AutoPlan completed with ${result.errors.length} error(s)`,
         type: 'WARNING',
+      });
+    } else if (schedule.length > 0) {
+      // Count unique tasks and total hours
+      const uniqueTasks = new Set(schedule.map(s => s.split.originalTaskId)).size;
+      const totalMs = schedule.reduce((sum, s) => sum + s.split.estimatedMs, 0);
+      const totalHours = (totalMs / 3600000).toFixed(1);
+      PluginAPI.showSnack({
+        msg: `Scheduled ${uniqueTasks} task${uniqueTasks !== 1 ? 's' : ''} (${totalHours}h)`,
+        type: 'SUCCESS',
       });
     } else {
       PluginAPI.showSnack({
-        msg: message,
-        type: 'SUCCESS',
+        msg: 'No tasks to schedule',
+        type: 'INFO',
       });
     }
 
-    return { schedule, applied: true, result };
+    return { schedule, applied: true, result, deadlineMisses };
 
   } catch (error) {
     console.error('[AutoPlan] Error:', error);
     PluginAPI.showSnack({
-      msg: `AutoPlan error: ${error.message}`,
+      msg: `AutoPlan failed: ${error.message}`,
       type: 'ERROR',
     });
     throw error;
@@ -2414,10 +2456,4 @@ window.AutoPlanAPI = {
   mergeSplits: (taskId) => TaskMerger.mergeSplits(taskId),
   findAllSplitGroups: () => TaskMerger.findAllSplitGroupsAsync(),
 };
-
-console.log('[AutoPlan] Plugin loaded successfully');
-PluginAPI.showSnack({
-  msg: 'AutoPlan plugin loaded. Press Ctrl+Shift+A to open.',
-  type: 'INFO',
-});
 

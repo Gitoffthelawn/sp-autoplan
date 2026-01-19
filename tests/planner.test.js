@@ -775,6 +775,27 @@ describe('AutoPlanner.schedule with deadlines', () => {
     expect(result.deadlineMisses.length).toBe(0);
   });
 
+  it('detects tasks with deadlines already in the past', () => {
+    // Task with deadline that was yesterday
+    const task = createTask({
+      id: 'task-1',
+      title: 'Overdue Task',
+      timeEstimate: 2 * 60 * 60 * 1000, // 2 hours
+      notes: 'Deadline: 2024-01-14 17:00', // Yesterday at 5pm
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config);
+    const startTime = new Date('2024-01-15T09:00:00'); // Today
+    const result = AutoPlanner.schedule(splits, config, [], [], startTime);
+
+    // Should detect this as a deadline miss
+    expect(result.deadlineMisses.length).toBe(1);
+    expect(result.deadlineMisses[0].taskId).toBe('task-1');
+    expect(result.deadlineMisses[0].taskTitle).toBe('Overdue Task');
+    // The deadline was in the past
+    expect(result.deadlineMisses[0].dueDate < startTime).toBe(true);
+  });
+
   it('includes deadline urgency component in schedule items', () => {
     const task = createTask({
       id: 'task-1',
@@ -949,8 +970,8 @@ describe('AutoPlanner.scheduleWithAutoAdjust', () => {
       createTask({
         id: 'deadline-task',
         title: 'Deadline',
-        timeEstimate: 2 * 60 * 60 * 1000, // 2 hours
-        notes: 'Due: 2024-01-15', // Due today!
+        timeEstimate: 8 * 60 * 60 * 1000, // 8 hours (full day)
+        notes: 'Deadline: 2024-01-15 12:00', // Due at noon today - impossible!
       }),
     ];
 
@@ -973,7 +994,7 @@ describe('AutoPlanner.scheduleWithAutoAdjust', () => {
     const task = createTask({
       id: 'task-1',
       timeEstimate: 20 * 60 * 60 * 1000, // 20 hours
-      notes: 'Due: 2024-01-16', // Due tomorrow - will miss
+      notes: 'Deadline: 2024-01-16', // Due tomorrow - will miss
     });
 
     const noAdjustConfig = { ...config, autoAdjustUrgency: false, maxDaysAhead: 1 };
@@ -993,7 +1014,7 @@ describe('AutoPlanner.scheduleWithAutoAdjust', () => {
     const task = createTask({
       id: 'task-1',
       timeEstimate: 100 * 60 * 60 * 1000, // 100 hours = 12.5 days
-      notes: 'Due: 2024-01-16', // Due tomorrow
+      notes: 'Deadline: 2024-01-16', // Due tomorrow
     });
 
     const maxDayConfig = { ...config, maxDaysAhead: 2 };

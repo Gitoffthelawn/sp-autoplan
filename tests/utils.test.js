@@ -184,17 +184,20 @@ describe('getTaskDueDate', () => {
     expect(getTaskDueDate(task)).toBe(null);
   });
 
-  it('returns Date from dueDate field', () => {
-    const timestamp = new Date('2024-01-20').getTime();
+  it('returns Date from dueDate field, adjusting midnight to end of day', () => {
+    const timestamp = new Date('2024-01-20').getTime(); // Midnight UTC
     const task = { dueDate: timestamp };
     const result = getTaskDueDate(task);
     expect(result).toBeInstanceOf(Date);
-    expect(result.getTime()).toBe(timestamp);
+    // Midnight gets adjusted to 23:59:59.999 (end of day)
+    expect(result.getDate()).toBe(20);
+    expect(result.getHours()).toBe(23);
+    expect(result.getMinutes()).toBe(59);
   });
 
   it('prefers notes deadline over dueDate', () => {
     const dueDate = new Date('2024-01-21').getTime();
-    const task = { dueDate, notes: 'Due: 2024-01-20' };
+    const task = { dueDate, notes: 'Deadline: 2024-01-20' };
     const result = getTaskDueDate(task);
     expect(result).toBeInstanceOf(Date);
     expect(result.getFullYear()).toBe(2024);
@@ -215,7 +218,7 @@ describe('getTaskDueDate', () => {
 
 describe('parseDeadlineFromNotes', () => {
   it('parses ISO format deadline', () => {
-    const notes = 'Some task notes\nDue: 2024-01-20\nMore notes';
+    const notes = 'Some task notes\nDeadline: 2024-01-20\nMore notes';
     const result = parseDeadlineFromNotes(notes);
     expect(result).toBeInstanceOf(Date);
     expect(result.getFullYear()).toBe(2024);
@@ -223,8 +226,8 @@ describe('parseDeadlineFromNotes', () => {
     expect(result.getDate()).toBe(20);
   });
 
-  it('parses deadline with lowercase "due"', () => {
-    const notes = 'due: 2024-06-15';
+  it('parses deadline with lowercase "deadline"', () => {
+    const notes = 'deadline: 2024-06-15';
     const result = parseDeadlineFromNotes(notes);
     expect(result.getMonth()).toBe(5); // June
     expect(result.getDate()).toBe(15);
@@ -238,7 +241,7 @@ describe('parseDeadlineFromNotes', () => {
   });
 
   it('parses named month format', () => {
-    const notes = 'Due: Jan 20, 2024';
+    const notes = 'Deadline: Jan 20, 2024';
     const result = parseDeadlineFromNotes(notes);
     expect(result.getFullYear()).toBe(2024);
     expect(result.getMonth()).toBe(0);
@@ -246,14 +249,14 @@ describe('parseDeadlineFromNotes', () => {
   });
 
   it('parses MM/DD/YYYY format', () => {
-    const notes = 'Due: 01/20/2024';
+    const notes = 'Deadline: 01/20/2024';
     const result = parseDeadlineFromNotes(notes);
     expect(result.getMonth()).toBe(0);
     expect(result.getDate()).toBe(20);
   });
 
   it('parses DD/MM/YYYY format when day > 12', () => {
-    const notes = 'Due: 20/01/2024';
+    const notes = 'Deadline: 20/01/2024';
     const result = parseDeadlineFromNotes(notes);
     expect(result.getMonth()).toBe(0);
     expect(result.getDate()).toBe(20);

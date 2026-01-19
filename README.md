@@ -85,11 +85,10 @@ Use the **Schedule** tab to preview what will be scheduled before applying chang
 Since Super Productivity uses the same field for both scheduled time and due dates, AutoPlan provides an alternative way to set deadlines: **add a deadline in your task notes**.
 
 Add one of these formats to your task notes:
-- `Due: 2024-01-20`
 - `Deadline: 2024-01-20`
-- `Due: Jan 20, 2024`
-- `Due: 01/20/2024` (MM/DD/YYYY)
-- `due: 20/01/2024` (DD/MM/YYYY if day > 12)
+- `Deadline: Jan 20, 2024`
+- `Deadline: 01/20/2024` (MM/DD/YYYY)
+- `Deadline: 20/01/2024` (DD/MM/YYYY if day > 12)
 
 AutoPlan will parse these deadlines and prioritize tasks accordingly. Tasks with approaching deadlines will get higher urgency, and AutoPlan will warn you if a task cannot be completed before its deadline.
 
