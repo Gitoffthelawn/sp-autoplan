@@ -807,6 +807,99 @@ describe('AutoPlanner.schedule with deadlines', () => {
     expect(result.deadlineMisses.length).toBeGreaterThan(0);
     expect(result.deadlineMisses[0].unscheduledSplits).toBeGreaterThan(0);
   });
+
+  it('recalculates urgency for each future day, so due date urgency increases over time', () => {
+    // Scenario:
+    // - Task A: priority 5 (via tag), due in 14 days
+    // - Task B: priority 15 (via tag), no due date  
+    // - Task C: priority 7.6 (via tag), no due date
+    // - All tasks take 8 hours (full working day)
+    //
+    // Urgency calculations:
+    // - Day 1: A=7.40 (5 + 2.40 deadline), B=15.00, C=7.60
+    //   -> B wins, and C > A
+    // - Day 2 (with recalculation): A=7.86 (5 + 2.86 deadline), C=7.60
+    //   -> A wins because deadline urgency increased
+    // - Day 2 (without recalculation - BUG): A=7.40, C=7.60
+    //   -> C would win incorrectly
+    //
+    // Key insight: urgency must be recalculated at the time each split would be scheduled,
+    // not at the original start time. Otherwise, C would be scheduled before A on day 2
+    // because A's deadline urgency wouldn't increase for future days.
+
+    const startTime = new Date('2024-01-15T09:00:00'); // Monday
+    const fourteenDaysLater = new Date('2024-01-29T17:00:00'); // 14 days later
+    
+    const allTags = [
+      { id: 'tag-low', title: 'low' },
+      { id: 'tag-high', title: 'high' },
+      { id: 'tag-medium', title: 'medium' },
+    ];
+    
+    const configWithTags = {
+      ...config,
+      tagPriorities: {
+        'low': 5,      // Task A base priority
+        'high': 15,    // Task B base priority
+        'medium': 7.6, // Task C base priority (slightly higher than A's total on day 1)
+      },
+    };
+
+    const tasks = [
+      createTask({
+        id: 'task-A',
+        title: 'Task A (low priority but with deadline)',
+        timeEstimate: 8 * 60 * 60 * 1000, // 8 hours = full work day
+        tagIds: ['tag-low'],
+        dueDate: fourteenDaysLater.getTime(),
+      }),
+      createTask({
+        id: 'task-B',
+        title: 'Task B (high priority)',
+        timeEstimate: 8 * 60 * 60 * 1000, // 8 hours = full work day
+        tagIds: ['tag-high'],
+        // No due date
+      }),
+      createTask({
+        id: 'task-C',
+        title: 'Task C (higher than A on day 1, but lower after deadline urgency increases)',
+        timeEstimate: 8 * 60 * 60 * 1000, // 8 hours = full work day
+        tagIds: ['tag-medium'],
+        // No due date
+      }),
+    ];
+
+    const splits = [];
+    for (const task of tasks) {
+      splits.push(...TaskSplitter.splitTask(task, 480, configWithTags)); // 8h max block
+    }
+
+    const result = AutoPlanner.schedule(splits, configWithTags, allTags, [], startTime);
+
+    // Should have 3 splits scheduled (one per task)
+    expect(result.schedule).toHaveLength(3);
+
+    // Get the dates for each scheduled split
+    const day1 = new Date('2024-01-15').toDateString();
+    const day2 = new Date('2024-01-16').toDateString();
+    const day3 = new Date('2024-01-17').toDateString();
+
+    const getTaskForDay = (dateString) => {
+      const item = result.schedule.find(s => s.startTime.toDateString() === dateString);
+      return item?.split.originalTaskId;
+    };
+
+    // Day 1: B should be scheduled (highest base priority of 10)
+    expect(getTaskForDay(day1)).toBe('task-B');
+
+    // Day 2: A should be scheduled (deadline urgency increases as we approach due date)
+    // Even though C has 5.1 base priority vs A's 5.0, A's deadline urgency
+    // should push it above C when calculated from day 2's perspective
+    expect(getTaskForDay(day2)).toBe('task-A');
+
+    // Day 3: C should be scheduled (remaining task with 5.1 base priority)
+    expect(getTaskForDay(day3)).toBe('task-C');
+  });
 });
 
 describe('AutoPlanner.scheduleWithAutoAdjust', () => {
