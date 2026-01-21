@@ -92,12 +92,17 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
               });
             } else {
               // Subsequent splits: Create new tasks with no time tracking data
-              const newTaskId = await PluginAPI.addTask({
+              // Use realTagIds (task's own tags) not tagIds (which includes virtual/inherited)
+              const splitTagIds = item.split.realTagIds || item.split.tagIds;
+              
+              // Build task data - for subtasks, SP API expects tags in 'subTaskIds' field
+              // We set both tagIds and subTaskIds to handle SP's quirky behavior
+              const taskData = {
                 title: item.split.title,
                 timeEstimate: item.split.estimatedMs,
                 timeSpent: 0, // New splits start with no time spent
                 timeSpentOnDay: {}, // New splits start with empty time-on-day tracking
-                tagIds: item.split.tagIds,
+                tagIds: splitTagIds,
                 projectId: item.split.projectId,
                 parentId: item.split.parentId,
                 notes: TaskMerger.generateSplitNotes(
@@ -107,7 +112,14 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
                   originalId,
                   originalTask.notes
                 ),
-              });
+              };
+              
+              // For subtasks, also set subTaskIds (SP API quirk)
+              if (item.split.parentId) {
+                taskData.subTaskIds = splitTagIds;
+              }
+              
+              const newTaskId = await PluginAPI.addTask(taskData);
 
               // Set the scheduled time via updateTask using appropriate field
               await PluginAPI.updateTask(newTaskId, schedulingFields);

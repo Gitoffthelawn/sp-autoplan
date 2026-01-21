@@ -406,24 +406,74 @@ function isFixedTask(task, config) {
 }
 
 /**
+ * Get virtual tag IDs for a task (tags inherited from parent tasks, not the task's own tags)
+ * @param {Object} task - The task to get virtual tags for
+ * @param {Array} allTasks - All tasks (needed to look up parent)
+ * @returns {Array} Array of tag IDs inherited from parent tasks (excludes task's own tags)
+ */
+function getVirtualTagIds(task, allTasks) {
+  const virtualTagIds = new Set();
+  
+  // If task has a parent, get parent's tags (both real and inherited)
+  if (task.parentId && allTasks) {
+    const parent = allTasks.find(t => t.id === task.parentId);
+    if (parent) {
+      // Add parent's own tags (using getRealTagIds to handle SP's dual field quirk)
+      for (const tagId of getRealTagIds(parent)) {
+        virtualTagIds.add(tagId);
+      }
+      // Recursively get parent's virtual tags (handles nested subtasks)
+      const parentVirtualTags = getVirtualTagIds(parent, allTasks);
+      for (const tagId of parentVirtualTags) {
+        virtualTagIds.add(tagId);
+      }
+    }
+  }
+  
+  return Array.from(virtualTagIds);
+}
+
+/**
+ * Get real tag IDs for a task (the task's own tags from the Super Productivity data model)
+ * Note: Super Productivity has a quirk where subtask tags may be stored in 'subTaskIds' 
+ * when added via API, but in 'tagIds' when added via UI. This function reads from both
+ * fields and combines them to ensure we get all tags.
+ * @param {Object} task - The task to get real tags for
+ * @returns {Array} Array of tag IDs that belong directly to this task
+ */
+function getRealTagIds(task) {
+  const tagIds = new Set();
+  
+  // Add tags from tagIds (standard field)
+  for (const tagId of (task.tagIds || [])) {
+    tagIds.add(tagId);
+  }
+  
+  // Add tags from subTaskIds (SP API quirk for subtasks)
+  // Note: subTaskIds is confusingly named - it stores tag IDs for subtasks, not subtask IDs
+  if (task.parentId && task.subTaskIds) {
+    for (const tagId of task.subTaskIds) {
+      tagIds.add(tagId);
+    }
+  }
+  
+  return Array.from(tagIds);
+}
+
+/**
  * Get effective tag IDs for a task, including inherited tags from parent tasks
+ * This combines real tags (task's own) and virtual tags (inherited from parents)
  * @param {Object} task - The task to get tags for
  * @param {Array} allTasks - All tasks (needed to look up parent)
  * @returns {Array} Array of tag IDs including inherited ones
  */
 function getEffectiveTagIds(task, allTasks) {
-  const tagIds = new Set(task.tagIds || []);
+  const tagIds = new Set(getRealTagIds(task));
   
-  // If task has a parent, inherit parent's tags
-  if (task.parentId && allTasks) {
-    const parent = allTasks.find(t => t.id === task.parentId);
-    if (parent) {
-      // Recursively get parent's effective tags (handles nested subtasks)
-      const parentTags = getEffectiveTagIds(parent, allTasks);
-      for (const tagId of parentTags) {
-        tagIds.add(tagId);
-      }
-    }
+  // Add virtual tags (inherited from parent)
+  const virtualTags = getVirtualTagIds(task, allTasks);
+  for (const tagId of virtualTags) {
+    tagIds.add(tagId);
   }
   
   return Array.from(tagIds);
@@ -644,8 +694,9 @@ const TaskSplitter = {
    * @param {Object} task - The task to split
    * @param {number} blockSizeMinutes - Size of each block in minutes
    * @param {Object} config - Configuration object
+   * @param {Array} allTasks - All tasks (optional, needed for computing virtualTagIds for subtasks)
    */
-  splitTask(task, blockSizeMinutes, config) {
+  splitTask(task, blockSizeMinutes, config, allTasks = []) {
     // Validate inputs
     if (!blockSizeMinutes || blockSizeMinutes <= 0) {
       blockSizeMinutes = DEFAULT_CONFIG.blockSizeMinutes;
@@ -664,6 +715,11 @@ const TaskSplitter = {
     const blockSizeHours = blockSizeMinutes / 60;
     const numBlocks = Math.ceil(estimatedHours / blockSizeHours);
     const splits = [];
+
+    // Real tags: the task's own tags from the Super Productivity data model
+    const realTagIds = getRealTagIds(task);
+    // Virtual tags: tags inherited from parent tasks (only applicable for subtasks)
+    const virtualTagIds = getVirtualTagIds(task, allTasks);
 
     for (let i = 0; i < numBlocks; i++) {
       const isLastBlock = i === numBlocks - 1;
@@ -693,7 +749,12 @@ const TaskSplitter = {
         estimatedMs: blockHours * 60 * 60 * 1000,
         timeSpentMs: timeSpentMs,
         timeSpentOnDay: timeSpentOnDay,
-        tagIds: task.tagIds || [],
+        // Real tags: the task's own tags (from SP data model)
+        realTagIds: realTagIds,
+        // Virtual tags: inherited from parent tasks
+        virtualTagIds: virtualTagIds,
+        // Combined for backward compatibility (real + virtual)
+        tagIds: [...new Set([...realTagIds, ...virtualTagIds])],
         projectId: task.projectId,
         parentId: task.parentId,
         // Link to other splits
@@ -749,7 +810,7 @@ const TaskSplitter = {
         continue;
       }
 
-      const splits = this.splitTask(task, blockSizeMinutes, config);
+      const splits = this.splitTask(task, blockSizeMinutes, config, tasks);
       allSplits.push(...splits);
     }
 
@@ -980,6 +1041,9 @@ const AutoPlanner = {
       title: newSplitTitle,
       estimatedHours: remainderHours,
       estimatedMs: remainderMinutes * 60 * 1000,
+      // Preserve the tag structure from the original split
+      realTagIds: mostUrgentSplit.realTagIds || mostUrgentSplit.tagIds || [],
+      virtualTagIds: mostUrgentSplit.virtualTagIds || [],
       tagIds: mostUrgentSplit.tagIds,
       projectId: mostUrgentSplit.projectId,
       parentId: mostUrgentSplit.parentId,
@@ -1804,12 +1868,17 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
               });
             } else {
               // Subsequent splits: Create new tasks with no time tracking data
-              const newTaskId = await PluginAPI.addTask({
+              // Use realTagIds (task's own tags) not tagIds (which includes virtual/inherited)
+              const splitTagIds = item.split.realTagIds || item.split.tagIds;
+              
+              // Build task data - for subtasks, SP API expects tags in 'subTaskIds' field
+              // We set both tagIds and subTaskIds to handle SP's quirky behavior
+              const taskData = {
                 title: item.split.title,
                 timeEstimate: item.split.estimatedMs,
                 timeSpent: 0, // New splits start with no time spent
                 timeSpentOnDay: {}, // New splits start with empty time-on-day tracking
-                tagIds: item.split.tagIds,
+                tagIds: splitTagIds,
                 projectId: item.split.projectId,
                 parentId: item.split.parentId,
                 notes: TaskMerger.generateSplitNotes(
@@ -1819,7 +1888,14 @@ AutoPlanner.applySchedule = async function(schedule, originalTasks) {
                   originalId,
                   originalTask.notes
                 ),
-              });
+              };
+              
+              // For subtasks, also set subTaskIds (SP API quirk)
+              if (item.split.parentId) {
+                taskData.subTaskIds = splitTagIds;
+              }
+              
+              const newTaskId = await PluginAPI.addTask(taskData);
 
               // Set the scheduled time via updateTask using appropriate field
               await PluginAPI.updateTask(newTaskId, schedulingFields);

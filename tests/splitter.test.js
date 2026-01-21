@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TaskSplitter, DEFAULT_CONFIG } from '../src/core.js';
+import { TaskSplitter, DEFAULT_CONFIG, getRealTagIds, getVirtualTagIds, getEffectiveTagIds } from '../src/core.js';
 
 // Helper to create a task
 function createTask(overrides = {}) {
@@ -83,14 +83,16 @@ describe('TaskSplitter.splitTask', () => {
       id: 'my-task',
       tagIds: ['tag-a', 'tag-b'],
       projectId: 'proj-123',
-      parentId: 'parent-1',
+      parentId: null, // Use null so no virtual tags expected
     });
     const splits = TaskSplitter.splitTask(task, 120, config);
 
     expect(splits[0].originalTaskId).toBe('my-task');
     expect(splits[0].tagIds).toEqual(['tag-a', 'tag-b']);
+    expect(splits[0].realTagIds).toEqual(['tag-a', 'tag-b']);
+    expect(splits[0].virtualTagIds).toEqual([]);
     expect(splits[0].projectId).toBe('proj-123');
-    expect(splits[0].parentId).toBe('parent-1');
+    expect(splits[0].parentId).toBe(null);
   });
 
   it('sets correct split indices and links', () => {
@@ -235,5 +237,256 @@ describe('TaskSplitter.processAllTasks', () => {
     const { splits } = TaskSplitter.processAllTasks(tasks, 120, config);
     expect(splits).toHaveLength(1);
     expect(splits[0].originalTaskId).toBe('task-2');
+  });
+});
+
+// ============================================================================
+// REAL vs VIRTUAL TAGS TESTS
+// ============================================================================
+
+describe('getRealTagIds', () => {
+  it('returns the task own tagIds', () => {
+    const task = createTask({ tagIds: ['tag-a', 'tag-b'] });
+    expect(getRealTagIds(task)).toEqual(['tag-a', 'tag-b']);
+  });
+
+  it('returns empty array for task without tags', () => {
+    const task = createTask({ tagIds: undefined });
+    expect(getRealTagIds(task)).toEqual([]);
+  });
+
+  it('returns empty array for null tagIds', () => {
+    const task = createTask({ tagIds: null });
+    expect(getRealTagIds(task)).toEqual([]);
+  });
+
+  it('includes subTaskIds for subtasks (SP API quirk)', () => {
+    // SP stores subtask tags in subTaskIds when added via API
+    const subtask = createTask({ 
+      id: 'subtask',
+      tagIds: ['tag-a'],
+      subTaskIds: ['tag-b', 'tag-c'],
+      parentId: 'parent'
+    });
+    const realTags = getRealTagIds(subtask);
+    expect(realTags).toContain('tag-a');
+    expect(realTags).toContain('tag-b');
+    expect(realTags).toContain('tag-c');
+    expect(realTags).toHaveLength(3);
+  });
+
+  it('deduplicates tags from tagIds and subTaskIds', () => {
+    const subtask = createTask({ 
+      id: 'subtask',
+      tagIds: ['tag-a', 'tag-b'],
+      subTaskIds: ['tag-b', 'tag-c'], // tag-b is duplicated
+      parentId: 'parent'
+    });
+    const realTags = getRealTagIds(subtask);
+    expect(realTags).toContain('tag-a');
+    expect(realTags).toContain('tag-b');
+    expect(realTags).toContain('tag-c');
+    expect(realTags).toHaveLength(3); // No duplicates
+  });
+
+  it('ignores subTaskIds for non-subtasks (no parentId)', () => {
+    // subTaskIds should only be considered for actual subtasks
+    const task = createTask({ 
+      id: 'task',
+      tagIds: ['tag-a'],
+      subTaskIds: ['tag-b'], // Should be ignored for non-subtasks
+      parentId: null
+    });
+    const realTags = getRealTagIds(task);
+    expect(realTags).toEqual(['tag-a']);
+  });
+});
+
+describe('getVirtualTagIds', () => {
+  it('returns empty array for task without parent', () => {
+    const task = createTask({ id: 'task-1', parentId: null, tagIds: ['tag-own'] });
+    const allTasks = [task];
+    expect(getVirtualTagIds(task, allTasks)).toEqual([]);
+  });
+
+  it('returns parent tags for subtask', () => {
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: null });
+    const subtask = createTask({ id: 'subtask', tagIds: ['tag-own'], parentId: 'parent' });
+    const allTasks = [parent, subtask];
+
+    const virtualTags = getVirtualTagIds(subtask, allTasks);
+    expect(virtualTags).toEqual(['tag-parent']);
+  });
+
+  it('returns grandparent tags for nested subtask', () => {
+    const grandparent = createTask({ id: 'grandparent', tagIds: ['tag-grandparent'], parentId: null });
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: 'grandparent' });
+    const subtask = createTask({ id: 'subtask', tagIds: ['tag-own'], parentId: 'parent' });
+    const allTasks = [grandparent, parent, subtask];
+
+    const virtualTags = getVirtualTagIds(subtask, allTasks);
+    // Should include both parent and grandparent tags
+    expect(virtualTags).toContain('tag-parent');
+    expect(virtualTags).toContain('tag-grandparent');
+    expect(virtualTags).toHaveLength(2);
+  });
+
+  it('returns empty array when allTasks is empty', () => {
+    const subtask = createTask({ id: 'subtask', tagIds: ['tag-own'], parentId: 'parent' });
+    expect(getVirtualTagIds(subtask, [])).toEqual([]);
+  });
+
+  it('returns empty array when parent not found', () => {
+    const subtask = createTask({ id: 'subtask', tagIds: ['tag-own'], parentId: 'nonexistent' });
+    const allTasks = [subtask];
+    expect(getVirtualTagIds(subtask, allTasks)).toEqual([]);
+  });
+});
+
+describe('getEffectiveTagIds', () => {
+  it('returns own tags for task without parent', () => {
+    const task = createTask({ id: 'task-1', tagIds: ['tag-a', 'tag-b'], parentId: null });
+    const allTasks = [task];
+    const effective = getEffectiveTagIds(task, allTasks);
+    expect(effective).toContain('tag-a');
+    expect(effective).toContain('tag-b');
+    expect(effective).toHaveLength(2);
+  });
+
+  it('combines own and parent tags for subtask', () => {
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: null });
+    const subtask = createTask({ id: 'subtask', tagIds: ['tag-own'], parentId: 'parent' });
+    const allTasks = [parent, subtask];
+
+    const effective = getEffectiveTagIds(subtask, allTasks);
+    expect(effective).toContain('tag-own');
+    expect(effective).toContain('tag-parent');
+    expect(effective).toHaveLength(2);
+  });
+
+  it('deduplicates when subtask has same tag as parent', () => {
+    const parent = createTask({ id: 'parent', tagIds: ['shared-tag', 'tag-parent'], parentId: null });
+    const subtask = createTask({ id: 'subtask', tagIds: ['shared-tag', 'tag-own'], parentId: 'parent' });
+    const allTasks = [parent, subtask];
+
+    const effective = getEffectiveTagIds(subtask, allTasks);
+    expect(effective).toContain('shared-tag');
+    expect(effective).toContain('tag-own');
+    expect(effective).toContain('tag-parent');
+    expect(effective).toHaveLength(3); // No duplicates
+  });
+});
+
+describe('TaskSplitter.splitTask with subtask tags', () => {
+  const config = { ...DEFAULT_CONFIG, splitSuffix: true };
+
+  it('splits include realTagIds and virtualTagIds for standalone task', () => {
+    const task = createTask({ id: 'task-1', tagIds: ['tag-a', 'tag-b'], parentId: null });
+    const allTasks = [task];
+    const splits = TaskSplitter.splitTask(task, 120, config, allTasks);
+
+    expect(splits[0].realTagIds).toEqual(['tag-a', 'tag-b']);
+    expect(splits[0].virtualTagIds).toEqual([]);
+    expect(splits[0].tagIds).toEqual(['tag-a', 'tag-b']);
+  });
+
+  it('splits include parent tags as virtualTagIds for subtask', () => {
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: null });
+    const subtask = createTask({ 
+      id: 'subtask', 
+      tagIds: ['tag-own'], 
+      parentId: 'parent',
+      timeEstimate: 4 * 60 * 60 * 1000 
+    });
+    const allTasks = [parent, subtask];
+    const splits = TaskSplitter.splitTask(subtask, 120, config, allTasks);
+
+    // All splits should have the same tag structure
+    for (const split of splits) {
+      expect(split.realTagIds).toEqual(['tag-own']);
+      expect(split.virtualTagIds).toEqual(['tag-parent']);
+      // Combined tagIds should include both
+      expect(split.tagIds).toContain('tag-own');
+      expect(split.tagIds).toContain('tag-parent');
+      expect(split.tagIds).toHaveLength(2);
+    }
+  });
+
+  it('preserves tags correctly across all splits of a subtask', () => {
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent-1', 'tag-parent-2'], parentId: null });
+    const subtask = createTask({ 
+      id: 'subtask', 
+      tagIds: ['tag-own'], 
+      parentId: 'parent',
+      timeEstimate: 6 * 60 * 60 * 1000 // 6 hours = 3 splits
+    });
+    const allTasks = [parent, subtask];
+    const splits = TaskSplitter.splitTask(subtask, 120, config, allTasks);
+
+    expect(splits).toHaveLength(3);
+
+    // Each split should have identical tag info
+    for (let i = 0; i < splits.length; i++) {
+      expect(splits[i].realTagIds).toEqual(['tag-own']);
+      expect(splits[i].virtualTagIds).toContain('tag-parent-1');
+      expect(splits[i].virtualTagIds).toContain('tag-parent-2');
+      expect(splits[i].virtualTagIds).toHaveLength(2);
+    }
+  });
+
+  it('handles deeply nested subtasks with inherited tags', () => {
+    const grandparent = createTask({ id: 'gp', tagIds: ['tag-gp'], parentId: null });
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: 'gp' });
+    const subtask = createTask({ 
+      id: 'subtask', 
+      tagIds: ['tag-own'], 
+      parentId: 'parent',
+      timeEstimate: 2 * 60 * 60 * 1000 
+    });
+    const allTasks = [grandparent, parent, subtask];
+    const splits = TaskSplitter.splitTask(subtask, 120, config, allTasks);
+
+    expect(splits).toHaveLength(1);
+    expect(splits[0].realTagIds).toEqual(['tag-own']);
+    expect(splits[0].virtualTagIds).toContain('tag-parent');
+    expect(splits[0].virtualTagIds).toContain('tag-gp');
+    expect(splits[0].virtualTagIds).toHaveLength(2);
+  });
+
+  it('works without allTasks parameter (backward compatibility)', () => {
+    const task = createTask({ id: 'task-1', tagIds: ['tag-a'], parentId: null });
+    // Call without allTasks - should still work
+    const splits = TaskSplitter.splitTask(task, 120, config);
+
+    expect(splits[0].realTagIds).toEqual(['tag-a']);
+    expect(splits[0].virtualTagIds).toEqual([]);
+    expect(splits[0].tagIds).toEqual(['tag-a']);
+  });
+});
+
+describe('TaskSplitter.processAllTasks with subtask tags', () => {
+  const config = { ...DEFAULT_CONFIG, splitSuffix: true };
+
+  it('subtask splits include virtualTagIds from parent', () => {
+    const parent = createTask({ id: 'parent', tagIds: ['urgent'], timeEstimate: 4 * 60 * 60 * 1000 });
+    const subtask = createTask({ 
+      id: 'subtask', 
+      tagIds: ['specific'], 
+      parentId: 'parent',
+      timeEstimate: 2 * 60 * 60 * 1000 
+    });
+    const allTasks = [parent, subtask];
+
+    const { splits } = TaskSplitter.processAllTasks(allTasks, 120, config);
+
+    // Should only have splits from subtask (parent is skipped)
+    expect(splits).toHaveLength(1);
+    expect(splits[0].originalTaskId).toBe('subtask');
+    
+    // Subtask split should have real and virtual tags
+    expect(splits[0].realTagIds).toEqual(['specific']);
+    expect(splits[0].virtualTagIds).toEqual(['urgent']);
+    expect(splits[0].tagIds).toContain('specific');
+    expect(splits[0].tagIds).toContain('urgent');
   });
 });
