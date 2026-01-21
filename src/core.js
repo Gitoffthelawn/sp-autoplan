@@ -697,7 +697,24 @@ export const TaskSplitter = {
     if (remainingHours <= 0) return [];
 
     const blockSizeHours = blockSizeMinutes / 60;
-    const numBlocks = Math.ceil(estimatedHours / blockSizeHours);
+    
+    // Calculate time already spent in hours
+    const timeSpentHours = (task.timeSpent || 0) / (60 * 60 * 1000);
+    
+    // First split: includes timeSpent + one full block (capped at total estimate)
+    // This ensures the "work already done" stays with the first split and
+    // gives it one full block of new work to do
+    const firstBlockHours = Math.min(timeSpentHours + blockSizeHours, estimatedHours);
+    
+    // Remaining hours after first block
+    const remainingAfterFirst = estimatedHours - firstBlockHours;
+    
+    // Calculate number of additional blocks needed for remaining time
+    const additionalBlocks = remainingAfterFirst > 0 
+      ? Math.ceil(remainingAfterFirst / blockSizeHours) 
+      : 0;
+    const numBlocks = 1 + additionalBlocks;
+    
     const splits = [];
 
     // Real tags: the task's own tags from the Super Productivity data model
@@ -705,11 +722,21 @@ export const TaskSplitter = {
     // Virtual tags: tags inherited from parent tasks (only applicable for subtasks)
     const virtualTagIds = getVirtualTagIds(task, allTasks);
 
+    // Track how much time has been allocated
+    let allocatedHours = 0;
+
     for (let i = 0; i < numBlocks; i++) {
-      const isLastBlock = i === numBlocks - 1;
-      const blockHours = isLastBlock 
-        ? estimatedHours - (i * blockSizeHours) 
-        : blockSizeHours;
+      let blockHours;
+      if (i === 0) {
+        // First block: timeSpent + one full block (capped at total)
+        blockHours = firstBlockHours;
+      } else {
+        // Subsequent blocks: full block size or remaining time
+        const remaining = estimatedHours - allocatedHours;
+        blockHours = Math.min(blockSizeHours, remaining);
+      }
+      
+      allocatedHours += blockHours;
 
       let splitName = task.title;
       if (config.splitPrefix) {

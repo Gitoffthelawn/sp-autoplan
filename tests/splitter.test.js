@@ -122,6 +122,55 @@ describe('TaskSplitter.splitTask', () => {
     expect(splits).toHaveLength(0);
   });
 
+  it('first split includes timeSpent plus one block for partially worked task', () => {
+    // 5 hour task with 1.5 hours already worked, 2 hour blocks
+    // Expected: first split = 1.5h (spent) + 2h (block) = 3.5h
+    //           second split = 5h - 3.5h = 1.5h
+    const task = createTask({
+      timeEstimate: 5 * 60 * 60 * 1000, // 5 hours
+      timeSpent: 1.5 * 60 * 60 * 1000,  // 1.5 hours already worked
+    });
+    const splits = TaskSplitter.splitTask(task, 120, config); // 2 hour blocks
+
+    expect(splits).toHaveLength(2);
+    // First split: timeSpent (1.5h) + blockSize (2h) = 3.5h
+    expect(splits[0].estimatedHours).toBe(3.5);
+    expect(splits[0].timeSpentMs).toBe(1.5 * 60 * 60 * 1000);
+    // Second split: remaining = 5h - 3.5h = 1.5h
+    expect(splits[1].estimatedHours).toBe(1.5);
+    expect(splits[1].timeSpentMs).toBe(0);
+  });
+
+  it('first split includes timeSpent that exceeds block size', () => {
+    // 6 hour task with 2.5 hours already worked, 2 hour blocks
+    // First block should be 2.5h (spent) + 2h = 4.5h
+    // Second block = 6h - 4.5h = 1.5h
+    const task = createTask({
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+      timeSpent: 2.5 * 60 * 60 * 1000,  // 2.5 hours already worked
+    });
+    const splits = TaskSplitter.splitTask(task, 120, config);
+
+    expect(splits).toHaveLength(2);
+    expect(splits[0].estimatedHours).toBe(4.5);
+    expect(splits[0].timeSpentMs).toBe(2.5 * 60 * 60 * 1000);
+    expect(splits[1].estimatedHours).toBe(1.5);
+  });
+
+  it('handles task where timeSpent plus one block exceeds total estimate', () => {
+    // 3 hour task with 2.5 hours worked, 2 hour blocks
+    // Since 2.5h + 2h = 4.5h > 3h, first split should be the full task
+    const task = createTask({
+      timeEstimate: 3 * 60 * 60 * 1000, // 3 hours
+      timeSpent: 2.5 * 60 * 60 * 1000,  // 2.5 hours worked
+    });
+    const splits = TaskSplitter.splitTask(task, 120, config);
+
+    expect(splits).toHaveLength(1);
+    expect(splits[0].estimatedHours).toBe(3);
+    expect(splits[0].timeSpentMs).toBe(2.5 * 60 * 60 * 1000);
+  });
+
   it('returns empty array for task with more time spent than estimated', () => {
     const task = createTask({
       timeEstimate: 2 * 60 * 60 * 1000,
@@ -488,5 +537,91 @@ describe('TaskSplitter.processAllTasks with subtask tags', () => {
     expect(splits[0].virtualTagIds).toEqual(['urgent']);
     expect(splits[0].tagIds).toContain('specific');
     expect(splits[0].tagIds).toContain('urgent');
+  });
+});
+
+describe('TaskSplitter.splitTask with partially worked subtasks', () => {
+  const config = { ...DEFAULT_CONFIG, splitSuffix: true };
+
+  it('subtask with timeSpent splits correctly with first block including spent time', () => {
+    // 5 hour subtask with 1.5 hours already worked, 2 hour blocks
+    // Expected: first split = 1.5h (spent) + 2h (block) = 3.5h
+    //           second split = 5h - 3.5h = 1.5h
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: null });
+    const subtask = createTask({
+      id: 'subtask',
+      tagIds: ['tag-own'],
+      parentId: 'parent',
+      timeEstimate: 5 * 60 * 60 * 1000, // 5 hours
+      timeSpent: 1.5 * 60 * 60 * 1000,  // 1.5 hours already worked
+    });
+    const allTasks = [parent, subtask];
+    const splits = TaskSplitter.splitTask(subtask, 120, config, allTasks);
+
+    expect(splits).toHaveLength(2);
+    // First split: timeSpent (1.5h) + blockSize (2h) = 3.5h
+    expect(splits[0].estimatedHours).toBe(3.5);
+    expect(splits[0].timeSpentMs).toBe(1.5 * 60 * 60 * 1000);
+    // Second split: remaining = 5h - 3.5h = 1.5h
+    expect(splits[1].estimatedHours).toBe(1.5);
+    expect(splits[1].timeSpentMs).toBe(0);
+
+    // Both splits should preserve virtual tags from parent
+    for (const split of splits) {
+      expect(split.realTagIds).toEqual(['tag-own']);
+      expect(split.virtualTagIds).toEqual(['tag-parent']);
+      expect(split.tagIds).toContain('tag-own');
+      expect(split.tagIds).toContain('tag-parent');
+    }
+  });
+
+  it('deeply nested subtask with timeSpent splits correctly', () => {
+    // 6 hour nested subtask with 2.5 hours worked
+    // First block = 2.5h + 2h = 4.5h, second block = 1.5h
+    const grandparent = createTask({ id: 'gp', tagIds: ['tag-gp'], parentId: null });
+    const parent = createTask({ id: 'parent', tagIds: ['tag-parent'], parentId: 'gp' });
+    const subtask = createTask({
+      id: 'subtask',
+      tagIds: ['tag-own'],
+      parentId: 'parent',
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+      timeSpent: 2.5 * 60 * 60 * 1000,  // 2.5 hours already worked
+    });
+    const allTasks = [grandparent, parent, subtask];
+    const splits = TaskSplitter.splitTask(subtask, 120, config, allTasks);
+
+    expect(splits).toHaveLength(2);
+    expect(splits[0].estimatedHours).toBe(4.5);
+    expect(splits[0].timeSpentMs).toBe(2.5 * 60 * 60 * 1000);
+    expect(splits[1].estimatedHours).toBe(1.5);
+
+    // All splits should have inherited tags from both parent and grandparent
+    for (const split of splits) {
+      expect(split.realTagIds).toEqual(['tag-own']);
+      expect(split.virtualTagIds).toContain('tag-parent');
+      expect(split.virtualTagIds).toContain('tag-gp');
+      expect(split.virtualTagIds).toHaveLength(2);
+    }
+  });
+
+  it('subtask where timeSpent plus one block exceeds total estimate', () => {
+    // 3 hour subtask with 2.5 hours worked
+    // Since 2.5h + 2h = 4.5h > 3h, first split should be the full task
+    const parent = createTask({ id: 'parent', tagIds: ['urgent'], parentId: null });
+    const subtask = createTask({
+      id: 'subtask',
+      tagIds: ['specific'],
+      parentId: 'parent',
+      timeEstimate: 3 * 60 * 60 * 1000, // 3 hours
+      timeSpent: 2.5 * 60 * 60 * 1000,  // 2.5 hours worked
+    });
+    const allTasks = [parent, subtask];
+    const splits = TaskSplitter.splitTask(subtask, 120, config, allTasks);
+
+    expect(splits).toHaveLength(1);
+    expect(splits[0].estimatedHours).toBe(3);
+    expect(splits[0].timeSpentMs).toBe(2.5 * 60 * 60 * 1000);
+    expect(splits[0].realTagIds).toEqual(['specific']);
+    expect(splits[0].virtualTagIds).toEqual(['urgent']);
   });
 });
