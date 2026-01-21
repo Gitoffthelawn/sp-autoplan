@@ -2342,6 +2342,13 @@ async function runAutoplan(dryRun = false) {
     // Apply the schedule
     const result = await AutoPlanner.applySchedule(schedule, eligibleTasks);
 
+    // Clean TODAY tag to remove tasks scheduled for future dates
+    // (PluginAPI.addTask automatically adds new tasks to TODAY)
+    const removedFromToday = await cleanTodayTag();
+    if (removedFromToday > 0) {
+      console.log(`[AutoPlan] Cleaned ${removedFromToday} future tasks from TODAY tag`);
+    }
+
     // Show snack notification with summary
     if (result.errors && result.errors.length > 0) {
       PluginAPI.showSnack({
@@ -2373,6 +2380,108 @@ async function runAutoplan(dryRun = false) {
       type: 'ERROR',
     });
     throw error;
+  }
+}
+
+/**
+ * Clean the TODAY tag to only include tasks that are actually scheduled for today.
+ * When PluginAPI.addTask() creates new tasks, Super Productivity automatically adds
+ * them to the TODAY tag. This function removes tasks that are scheduled for future dates.
+ * 
+ * @returns {Promise<number>} Number of tasks removed from TODAY tag
+ */
+async function cleanTodayTag() {
+  console.log('[AutoPlan] Cleaning TODAY tag...');
+  
+  try {
+    const allTasks = await PluginAPI.getTasks();
+    const allTags = await PluginAPI.getAllTags();
+    
+    // Find the TODAY tag
+    const todayTag = allTags.find(tag => tag.id === 'TODAY');
+    if (!todayTag || !todayTag.taskIds || todayTag.taskIds.length === 0) {
+      console.log('[AutoPlan] No tasks in TODAY tag to clean');
+      return 0;
+    }
+    
+    // Get today's date range (start and end of day in local time)
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    
+    // Build a map of task IDs to tasks for quick lookup
+    const taskMap = {};
+    for (const task of allTasks) {
+      taskMap[task.id] = task;
+    }
+    
+    // Find tasks that should be removed from TODAY
+    // A task should stay in TODAY if:
+    // 1. It has dueWithTime set for today, OR
+    // 2. It has no dueWithTime and no hasPlannedTime (manually added to TODAY)
+    const tasksToRemove = [];
+    for (const taskId of todayTag.taskIds) {
+      const task = taskMap[taskId];
+      if (!task) continue; // Task might have been deleted
+      
+      // If task has a planned time (dueWithTime + hasPlannedTime), check if it's for today
+      if (task.dueWithTime && task.hasPlannedTime) {
+        const taskDate = new Date(task.dueWithTime);
+        if (taskDate < todayStart || taskDate > todayEnd) {
+          // Task is scheduled for a different day - remove from TODAY
+          tasksToRemove.push(taskId);
+        }
+      }
+      // Tasks without dueWithTime or without hasPlannedTime are left alone
+      // (they may have been manually added to TODAY)
+    }
+    
+    if (tasksToRemove.length === 0) {
+      console.log('[AutoPlan] No tasks to remove from TODAY tag');
+      return 0;
+    }
+    
+    console.log(`[AutoPlan] Found ${tasksToRemove.length} tasks to remove from TODAY tag`);
+    
+    // Step 1: Update the TODAY tag's taskIds array to remove future-dated tasks
+    const tasksToRemoveSet = new Set(tasksToRemove);
+    const newTodayTaskIds = todayTag.taskIds.filter(id => !tasksToRemoveSet.has(id));
+    
+    try {
+      await PluginAPI.updateTag('TODAY', { taskIds: newTodayTaskIds });
+      console.log(`[AutoPlan] Updated TODAY tag taskIds: ${todayTag.taskIds.length} -> ${newTodayTaskIds.length}`);
+    } catch (e) {
+      console.warn('[AutoPlan] Failed to update TODAY tag taskIds:', e);
+    }
+    
+    // Step 2: Also update each task's tagIds to remove TODAY
+    // This ensures consistency from the task's perspective
+    let removedCount = 0;
+    for (const taskId of tasksToRemove) {
+      const task = taskMap[taskId];
+      if (!task) continue;
+      
+      try {
+        // Get current tagIds and remove TODAY
+        const currentTagIds = task.tagIds || [];
+        const newTagIds = currentTagIds.filter(id => id !== 'TODAY');
+        
+        // Only update if tagIds actually changed
+        if (newTagIds.length !== currentTagIds.length) {
+          await PluginAPI.updateTask(taskId, { tagIds: newTagIds });
+          removedCount++;
+        }
+      } catch (e) {
+        console.warn(`[AutoPlan] Failed to remove task ${taskId} from TODAY tag:`, e);
+      }
+    }
+    
+    console.log(`[AutoPlan] Removed ${removedCount} tasks from TODAY tag (scheduled for future dates)`);
+    return removedCount;
+    
+  } catch (error) {
+    console.warn('[AutoPlan] Error cleaning TODAY tag:', error);
+    return 0;
   }
 }
 
