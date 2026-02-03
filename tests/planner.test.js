@@ -177,6 +177,34 @@ describe('AutoPlanner.schedule', () => {
     expect(result.schedule[0].urgencyComponents.tag).toBeDefined();
   });
 
+  it('schedules only remaining time when first split includes timeSpent', () => {
+    const task = createTask({
+      id: 'task-1',
+      title: 'Long Task',
+      timeEstimate: 8 * 60 * 60 * 1000, // 8 hours
+      timeSpent: (3 * 60 + 13) * 60 * 1000, // 3h 13m
+    });
+
+    const splits = TaskSplitter.splitTask(task, 120, config); // 2 hour blocks
+    expect(splits).toHaveLength(3);
+
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(splits, config, allTags, [], startTime);
+
+    expect(result.schedule).toHaveLength(3);
+
+    const totalScheduledMs = result.schedule.reduce(
+      (sum, item) => sum + (item.endTime - item.startTime),
+      0
+    );
+    const remainingMs = task.timeEstimate - task.timeSpent;
+
+    expect(Math.abs(totalScheduledMs - remainingMs)).toBeLessThan(1000);
+
+    const firstBlockMs = result.schedule[0].endTime - result.schedule[0].startTime;
+    expect(Math.abs(firstBlockMs - (2 * 60 * 60 * 1000))).toBeLessThan(1000);
+  });
+
   it('schedules by priority with tag boosts', () => {
     const tagConfig = {
       ...config,

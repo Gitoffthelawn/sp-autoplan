@@ -835,6 +835,16 @@ export const TaskSplitter = {
 
 export const AutoPlanner = {
   /**
+   * Get remaining time for a split in milliseconds
+   * Accounts for time already spent on the split (only first split has timeSpentMs)
+   */
+  getSplitRemainingMs(split) {
+    const estimatedMs = split.estimatedMs ?? ((split.estimatedHours || 0) * 60 * 60 * 1000);
+    const timeSpentMs = split.timeSpentMs || 0;
+    const remainingMs = Math.max(0, estimatedMs - timeSpentMs);
+    return Math.round(remainingMs / 60000) * 60000;
+  },
+  /**
    * Check if a day should be skipped based on config (legacy)
    */
   shouldSkipDay(date, skipDays) {
@@ -963,7 +973,7 @@ export const AutoPlanner = {
       s => s.originalTaskId === split.originalTaskId
     );
     const totalRemainingMs = remainingSplitsForTask.reduce(
-      (sum, s) => sum + s.estimatedMs, 0
+      (sum, s) => sum + this.getSplitRemainingMs(s), 0
     );
 
     // Create a pseudo-task for urgency calculation
@@ -1331,7 +1341,15 @@ export const AutoPlanner = {
             continue;
           }
           
-          let blockMinutes = split.estimatedHours * 60;
+           let blockMinutes = this.getSplitRemainingMs(split) / 60000;
+           if (blockMinutes <= 0) {
+             // No remaining work for this split
+             remainingSplits.splice(splitIndex, 1);
+             timeMapSplits = timeMapSplits.filter(
+               s => !(s.originalTaskId === split.originalTaskId && s.splitIndex === split.splitIndex)
+             );
+             continue;
+           }
           
           // Handle case where block is larger than remaining time
           if (blockMinutes > remainingMinutes) {
