@@ -396,6 +396,11 @@ function isFixedTask(task, config) {
   if (hasTag(task, config?.doNotRescheduleTagId)) {
     return true;
   }
+
+  // Repeating tasks are always fixed
+  if (task?.repeatCfgId) {
+    return true;
+  }
   
   // Check if iCal tasks should be treated as fixed
   if (config?.treatIcalAsFixed !== false && task.issueType === 'ICAL') {
@@ -2302,18 +2307,15 @@ async function runAutoplan(dryRun = false) {
 
     console.log(`[AutoPlan] Processing ${allTasks.length} tasks`);
 
-    // Separate fixed tasks (tasks with do-not-reschedule tag)
-    let fixedTasks = [];
-    let schedulableTasks = allTasks;
-    
-    if (config.doNotRescheduleTagId) {
-      fixedTasks = allTasks.filter(t => 
-        !t.isDone && 
-        isFixedTask(t, config)
-      );
-      schedulableTasks = allTasks.filter(t => 
-        !isFixedTask(t, config)
-      );
+    // Separate fixed tasks (do-not-reschedule tag, iCal, repeating tasks)
+    const fixedTasks = allTasks.filter(t =>
+      !t.isDone &&
+      isFixedTask(t, config)
+    );
+    const schedulableTasks = allTasks.filter(t =>
+      !isFixedTask(t, config)
+    );
+    if (fixedTasks.length > 0) {
       console.log(`[AutoPlan] ${fixedTasks.length} fixed tasks (will not be rescheduled)`);
     }
 

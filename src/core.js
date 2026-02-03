@@ -380,6 +380,11 @@ export function isFixedTask(task, config) {
   if (hasTag(task, config?.doNotRescheduleTagId)) {
     return true;
   }
+
+  // Repeating tasks are always fixed
+  if (task?.repeatCfgId) {
+    return true;
+  }
   
   // Check if iCal tasks should be treated as fixed
   if (config?.treatIcalAsFixed !== false && task.issueType === 'ICAL') {

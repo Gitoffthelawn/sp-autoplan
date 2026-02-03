@@ -13,6 +13,7 @@ import {
   getTaskDueDate,
   parseDeadlineFromNotes,
   escapeRegex,
+  isFixedTask,
 } from '../src/core.js';
 
 describe('toRoman', () => {
@@ -173,6 +174,20 @@ describe('escapeRegex', () => {
 
   it('handles strings without special characters', () => {
     expect(escapeRegex('hello world')).toBe('hello world');
+  });
+});
+
+describe('isFixedTask', () => {
+  it('treats repeating tasks as fixed regardless of config', () => {
+    const task = { repeatCfgId: 'repeat-1' };
+    const config = { doNotRescheduleTagId: null, treatIcalAsFixed: false };
+    expect(isFixedTask(task, config)).toBe(true);
+  });
+
+  it('returns false for non-fixed tasks', () => {
+    const task = { tagIds: [], issueType: 'TASK' };
+    const config = { doNotRescheduleTagId: null, treatIcalAsFixed: false };
+    expect(isFixedTask(task, config)).toBe(false);
   });
 });
 
