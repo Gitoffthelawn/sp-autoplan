@@ -67,6 +67,7 @@ const DEFAULT_CONFIG = {
   defaultTimeMap: 'default', // Fallback time map for unassigned tasks
   doNotRescheduleTagId: null, // Tag ID for tasks that should not be rescheduled
   treatIcalAsFixed: true, // Treat iCal tasks as fixed (don't reschedule)
+  excludeBacklogTasks: false, // Exclude tasks in project backlog from scheduling
 };
 
 /**
@@ -383,6 +384,21 @@ function escapeRegex(str) {
  */
 function hasTag(task, tagId) {
   return !!(tagId && task && task.tagIds && task.tagIds.includes(tagId));
+}
+
+/**
+ * Check if a task is in a project's backlog
+ * @param {Object} task - The task to check
+ * @param {Array} allProjects - All available projects
+ * @returns {boolean} True if the task is in the backlog
+ */
+function isBacklogTask(task, allProjects) {
+  if (!task || !task.projectId || !allProjects) return false;
+  
+  const project = allProjects.find(p => p.id === task.projectId);
+  if (!project || !project.backlogTaskIds) return false;
+  
+  return project.backlogTaskIds.includes(task.id);
 }
 
 /**
@@ -2319,8 +2335,18 @@ async function runAutoplan(dryRun = false) {
       console.log(`[AutoPlan] ${fixedTasks.length} fixed tasks (will not be rescheduled)`);
     }
 
+    // Filter out backlog tasks if enabled (tasks in project backlog)
+    let nonBacklogTasks = schedulableTasks;
+    if (config.excludeBacklogTasks) {
+      const backlogTasks = schedulableTasks.filter(t => isBacklogTask(t, allProjects));
+      nonBacklogTasks = schedulableTasks.filter(t => !isBacklogTask(t, allProjects));
+      if (backlogTasks.length > 0) {
+        console.log(`[AutoPlan] ${backlogTasks.length} backlog tasks (excluded from scheduling)`);
+      }
+    }
+
     // Filter to only incomplete tasks with time estimates
-    const eligibleTasks = schedulableTasks.filter(t => 
+    const eligibleTasks = nonBacklogTasks.filter(t => 
       !t.isDone && 
       t.timeEstimate && 
       t.timeEstimate > 0

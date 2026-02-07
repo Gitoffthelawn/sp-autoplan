@@ -1109,6 +1109,14 @@
         </div>
         <p class="help-text">When enabled, tasks imported from iCal (calendar events) will be treated as fixed and won't be rescheduled. They will be skipped in the priority list.</p>
       </div>
+      
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="excludeBacklogTasks">
+          <label for="excludeBacklogTasks">Exclude backlog tasks</label>
+        </div>
+        <p class="help-text">When enabled, tasks in a project's backlog will not be scheduled. Backlog tasks are those you've set aside for later in Super Productivity's backlog drawer.</p>
+      </div>
     </div>
 
     <div class="section">
@@ -1495,6 +1503,7 @@
         skipDays: [0, 6], // Sunday and Saturday
         doNotRescheduleTagId: null,
         treatIcalAsFixed: true,
+        excludeBacklogTasks: false,
         // Time Maps
         timeMaps: {
           'default': {
@@ -1548,6 +1557,9 @@
       
       // Apply treat iCal as fixed setting
       document.getElementById('treatIcalAsFixed').checked = currentConfig.treatIcalAsFixed !== false;
+      
+      // Apply exclude backlog tasks setting
+      document.getElementById('excludeBacklogTasks').checked = currentConfig.excludeBacklogTasks || false;
 
       updateTagTable();
       updateProjectTable();
@@ -1574,6 +1586,9 @@
       
       // Get treat iCal as fixed setting
       const treatIcalAsFixed = document.getElementById('treatIcalAsFixed').checked;
+      
+      // Get exclude backlog tasks setting
+      const excludeBacklogTasks = document.getElementById('excludeBacklogTasks').checked;
 
       return {
         blockSizeMinutes: parseInt(document.getElementById('blockSize').value) || 120,
@@ -1594,6 +1609,7 @@
         projectPriorities: currentConfig.projectPriorities || {},
         doNotRescheduleTagId: doNotRescheduleTagId,
         treatIcalAsFixed: treatIcalAsFixed,
+        excludeBacklogTasks: excludeBacklogTasks,
         // Time Maps (managed separately, preserve current values)
         timeMaps: currentConfig.timeMaps || getDefaultConfig().timeMaps,
         projectTimeMaps: currentConfig.projectTimeMaps || {},

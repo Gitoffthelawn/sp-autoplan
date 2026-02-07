@@ -14,6 +14,7 @@ import {
   parseDeadlineFromNotes,
   escapeRegex,
   isFixedTask,
+  isBacklogTask,
 } from '../src/core.js';
 
 describe('toRoman', () => {
@@ -289,5 +290,93 @@ describe('parseDeadlineFromNotes', () => {
 
   it('returns null for empty notes', () => {
     expect(parseDeadlineFromNotes('')).toBe(null);
+  });
+});
+
+describe('isBacklogTask', () => {
+  const createProject = (id, backlogTaskIds = []) => ({
+    id,
+    title: `Project ${id}`,
+    backlogTaskIds,
+    taskIds: [],
+  });
+
+  const createTask = (id, projectId) => ({
+    id,
+    title: `Task ${id}`,
+    projectId,
+  });
+
+  it('returns true when task is in project backlog', () => {
+    const task = createTask('task-1', 'project-1');
+    const projects = [createProject('project-1', ['task-1', 'task-2'])];
+    expect(isBacklogTask(task, projects)).toBe(true);
+  });
+
+  it('returns false when task is not in project backlog', () => {
+    const task = createTask('task-3', 'project-1');
+    const projects = [createProject('project-1', ['task-1', 'task-2'])];
+    expect(isBacklogTask(task, projects)).toBe(false);
+  });
+
+  it('returns false when project has no backlog', () => {
+    const task = createTask('task-1', 'project-1');
+    const projects = [createProject('project-1')]; // No backlogTaskIds
+    expect(isBacklogTask(task, projects)).toBe(false);
+  });
+
+  it('returns false when project backlog is empty', () => {
+    const task = createTask('task-1', 'project-1');
+    const projects = [createProject('project-1', [])]; // Empty backlog
+    expect(isBacklogTask(task, projects)).toBe(false);
+  });
+
+  it('returns false when task has no projectId', () => {
+    const task = { id: 'task-1', title: 'Task without project' };
+    const projects = [createProject('project-1', ['task-1'])];
+    expect(isBacklogTask(task, projects)).toBe(false);
+  });
+
+  it('returns false when projects array is empty', () => {
+    const task = createTask('task-1', 'project-1');
+    expect(isBacklogTask(task, [])).toBe(false);
+  });
+
+  it('returns false when projects is null or undefined', () => {
+    const task = createTask('task-1', 'project-1');
+    expect(isBacklogTask(task, null)).toBe(false);
+    expect(isBacklogTask(task, undefined)).toBe(false);
+  });
+
+  it('returns false when task is null or undefined', () => {
+    const projects = [createProject('project-1', ['task-1'])];
+    expect(isBacklogTask(null, projects)).toBe(false);
+    expect(isBacklogTask(undefined, projects)).toBe(false);
+  });
+
+  it('returns false when project is not found', () => {
+    const task = createTask('task-1', 'project-2'); // Different project
+    const projects = [createProject('project-1', ['task-1'])];
+    expect(isBacklogTask(task, projects)).toBe(false);
+  });
+
+  it('handles multiple projects correctly', () => {
+    const taskInBacklog = createTask('task-1', 'project-1');
+    const taskNotInBacklog = createTask('task-2', 'project-2');
+    const projects = [
+      createProject('project-1', ['task-1']),
+      createProject('project-2', []), // project-2 has no backlog
+    ];
+    expect(isBacklogTask(taskInBacklog, projects)).toBe(true);
+    expect(isBacklogTask(taskNotInBacklog, projects)).toBe(false);
+  });
+
+  it('handles INBOX_PROJECT (which has no backlog)', () => {
+    const task = createTask('task-1', 'INBOX_PROJECT');
+    const projects = [
+      { id: 'INBOX_PROJECT', title: 'Inbox' }, // Inbox has no backlogTaskIds
+      createProject('project-1', ['task-1']),
+    ];
+    expect(isBacklogTask(task, projects)).toBe(false);
   });
 });

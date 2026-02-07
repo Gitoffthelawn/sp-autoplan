@@ -493,8 +493,18 @@ async function runAutoplan(dryRun = false) {
       console.log(`[AutoPlan] ${fixedTasks.length} fixed tasks (will not be rescheduled)`);
     }
 
+    // Filter out backlog tasks if enabled (tasks in project backlog)
+    let nonBacklogTasks = schedulableTasks;
+    if (config.excludeBacklogTasks) {
+      const backlogTasks = schedulableTasks.filter(t => isBacklogTask(t, allProjects));
+      nonBacklogTasks = schedulableTasks.filter(t => !isBacklogTask(t, allProjects));
+      if (backlogTasks.length > 0) {
+        console.log(`[AutoPlan] ${backlogTasks.length} backlog tasks (excluded from scheduling)`);
+      }
+    }
+
     // Filter to only incomplete tasks with time estimates
-    const eligibleTasks = schedulableTasks.filter(t => 
+    const eligibleTasks = nonBacklogTasks.filter(t => 
       !t.isDone && 
       t.timeEstimate && 
       t.timeEstimate > 0

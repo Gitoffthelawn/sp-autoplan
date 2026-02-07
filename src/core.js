@@ -51,6 +51,7 @@ export const DEFAULT_CONFIG = {
   defaultTimeMap: 'default', // Fallback time map for unassigned tasks
   doNotRescheduleTagId: null, // Tag ID for tasks that should not be rescheduled
   treatIcalAsFixed: true, // Treat iCal tasks as fixed (don't reschedule)
+  excludeBacklogTasks: false, // Exclude tasks in project backlog from scheduling
 };
 
 /**
@@ -367,6 +368,21 @@ export function escapeRegex(str) {
  */
 export function hasTag(task, tagId) {
   return !!(tagId && task && task.tagIds && task.tagIds.includes(tagId));
+}
+
+/**
+ * Check if a task is in a project's backlog
+ * @param {Object} task - The task to check
+ * @param {Array} allProjects - All available projects
+ * @returns {boolean} True if the task is in the backlog
+ */
+export function isBacklogTask(task, allProjects) {
+  if (!task || !task.projectId || !allProjects) return false;
+  
+  const project = allProjects.find(p => p.id === task.projectId);
+  if (!project || !project.backlogTaskIds) return false;
+  
+  return project.backlogTaskIds.includes(task.id);
 }
 
 /**
