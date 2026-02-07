@@ -1,6 +1,6 @@
 {
   "name": "sp-autoplan",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "AutoPlan plugin for Super Productivity",
   "main": "index.js",
   "type": "module",
