@@ -42,6 +42,21 @@ describe('PriorityCalculator.calculateTagPriority', () => {
     expect(PriorityCalculator.calculateTagPriority(task, tagPriorities, allTags)).toBe(15);
   });
 
+  it('sums multiple tags with same boost value (issue #21)', () => {
+    // Specific test for issue #21: two tags each with +10 should sum to +20
+    const tagsWithSameBoost = [
+      { id: 'tag-important', title: 'important' },
+      { id: 'tag-urgent', title: 'urgent' },
+    ];
+    const prioritiesWithSameBoost = {
+      important: 10,
+      urgent: 10,
+    };
+    const task = createTask({ tagIds: ['tag-important', 'tag-urgent'] });
+    const result = PriorityCalculator.calculateTagPriority(task, prioritiesWithSameBoost, tagsWithSameBoost);
+    expect(result).toBe(20); // Should sum both tags: 10 + 10 = 20
+  });
+
   it('handles negative tag boosts', () => {
     const task = createTask({ tagIds: ['tag-personal'] });
     expect(PriorityCalculator.calculateTagPriority(task, tagPriorities, allTags)).toBe(-2);
@@ -318,6 +333,38 @@ describe('PriorityCalculator.calculateUrgency', () => {
     expect(result.components.oldness).toBe(5);
     expect(result.components.deadline).toBe(0); // No due date
     expect(result.total).toBe(10 + 5 + 2 + 5); // 22
+  });
+
+  it('sums multiple tag priorities correctly in urgency calculation (issue #21)', () => {
+    // Specific test for issue #21: two tags with +10 each should sum to +20
+    const now = new Date('2024-01-15');
+    const multiTagTags = [
+      { id: 'tag-important', title: 'important' },
+      { id: 'tag-urgent', title: 'urgent' },
+    ];
+    const multiTagConfig = {
+      tagPriorities: { 
+        important: 10,
+        urgent: 10,
+      },
+      projectPriorities: {},
+      durationFormula: 'none',
+      durationWeight: 0,
+      oldnessFormula: 'none',
+      oldnessWeight: 0,
+    };
+    const task = createTask({
+      id: 'task-1',
+      tagIds: ['tag-important', 'tag-urgent'],
+      timeEstimate: 2 * 60 * 60 * 1000,
+      created: new Date('2024-01-10').getTime(),
+    });
+
+    const result = PriorityCalculator.calculateUrgency(task, multiTagConfig, multiTagTags, [], now);
+
+    // Both tags should be summed: 10 + 10 = 20
+    expect(result.components.tag).toBe(20);
+    expect(result.total).toBe(20); // Only tag priority since other formulas are 'none'
   });
 
   it('handles missing config properties with defaults', () => {
