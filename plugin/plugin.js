@@ -324,9 +324,16 @@ function parseDeadlineFromNotes(notes) {
  *   2. dueDate field (Super Productivity's all-day due date)
  *   3. Note: dueWithTime is NOT used here because SP uses it for scheduling, not deadlines
  * 
+ * If no deadline is set on the task, inherits from parent task (if available).
  * @returns {Date|null} The due date or null if not set
  */
-function getTaskDueDate(task) {
+function getTaskDueDate(task, allTasks = [], visitedTaskIds = new Set()) {
+  if (!task) return null;
+
+  if (task.id) {
+    if (visitedTaskIds.has(task.id)) return null;
+    visitedTaskIds.add(task.id);
+  }
   // First check for deadline in notes - this allows users to set deadlines
   // separately from the scheduled time (which uses dueWithTime in SP)
   const notesDeadline = parseDeadlineFromNotes(task.notes);
@@ -339,7 +346,15 @@ function getTaskDueDate(task) {
   if (task.dueDate) {
     return ensureDeadlineTime(new Date(task.dueDate));
   }
-  
+
+  // Inherit deadline from parent task (for subtasks) if none is set on this task
+  if (task.parentId && Array.isArray(allTasks) && allTasks.length > 0) {
+    const parentTask = allTasks.find(t => t.id === task.parentId);
+    if (parentTask) {
+      return getTaskDueDate(parentTask, allTasks, visitedTaskIds);
+    }
+  }
+
   return null;
 }
 
@@ -609,11 +624,11 @@ const PriorityCalculator = {
    * @param {Date} now - Current time for calculations
    * @returns {number} - Priority boost based on deadline proximity
    */
-  calculateDeadlinePriority(task, formula, weight, now = new Date()) {
+  calculateDeadlinePriority(task, formula, weight, now = new Date(), allTasks = []) {
     if (formula === 'none') return 0;
     if (weight <= 0) return 0;
 
-    const dueDate = getTaskDueDate(task);
+    const dueDate = getTaskDueDate(task, allTasks);
     if (!dueDate) return 0;
 
     // Calculate days until due (negative = overdue)
@@ -683,7 +698,7 @@ const PriorityCalculator = {
       task, config.oldnessFormula || 'none', config.oldnessWeight ?? 1.0, now
     );
     const deadlinePriority = this.calculateDeadlinePriority(
-      task, config.deadlineFormula || 'none', config.deadlineWeight ?? 12.0, now
+      task, config.deadlineFormula || 'none', config.deadlineWeight ?? 12.0, now, allTasks
     );
 
     // Apply urgencyWeight to non-deadline factors (like taskcheck's weight_urgency)
@@ -1451,7 +1466,7 @@ const AutoPlanner = {
     }
 
     // Check for deadline misses
-    const deadlineMisses = this.checkDeadlineMisses(schedule, splits);
+    const deadlineMisses = this.checkDeadlineMisses(schedule, splits, allTasks);
 
     return { schedule, deadlineMisses };
   },
@@ -1462,7 +1477,7 @@ const AutoPlanner = {
    * @param {Array} allSplits - All task splits (to check unscheduled tasks)
    * @returns {Array} - Array of deadline miss objects with task info and dates
    */
-  checkDeadlineMisses(schedule, allSplits) {
+  checkDeadlineMisses(schedule, allSplits, allTasks = []) {
     const deadlineMisses = [];
     
     // Group scheduled items by original task ID
@@ -1493,7 +1508,7 @@ const AutoPlanner = {
       checkedTasks.add(taskId);
 
       const originalTask = scheduledItems[0].split.originalTask;
-      const dueDate = getTaskDueDate(originalTask);
+      const dueDate = getTaskDueDate(originalTask, allTasks);
       
       if (!dueDate) continue; // No deadline, no miss possible
 
@@ -1528,7 +1543,7 @@ const AutoPlanner = {
       if (checkedTasks.has(taskId)) continue;
       
       const originalTask = splits[0].originalTask;
-      const dueDate = getTaskDueDate(originalTask);
+      const dueDate = getTaskDueDate(originalTask, allTasks);
       
       if (!dueDate) continue;
 

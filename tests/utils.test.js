@@ -221,6 +221,40 @@ describe('getTaskDueDate', () => {
     expect(result.getDate()).toBe(20);
   });
 
+  it('inherits parent deadline from notes when subtask has none', () => {
+    const parent = {
+      id: 'parent-1',
+      notes: 'Deadline: 2024-01-22',
+    };
+    const subtask = {
+      id: 'child-1',
+      parentId: 'parent-1',
+      notes: '',
+    };
+    const result = getTaskDueDate(subtask, [parent, subtask]);
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getFullYear()).toBe(2024);
+    expect(result.getMonth()).toBe(0);
+    expect(result.getDate()).toBe(22);
+  });
+
+  it('allows subtask to override parent deadline', () => {
+    const parent = {
+      id: 'parent-1',
+      notes: 'Deadline: 2024-01-22',
+    };
+    const subtask = {
+      id: 'child-1',
+      parentId: 'parent-1',
+      notes: 'Deadline: 2024-01-24',
+    };
+    const result = getTaskDueDate(subtask, [parent, subtask]);
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getFullYear()).toBe(2024);
+    expect(result.getMonth()).toBe(0);
+    expect(result.getDate()).toBe(24);
+  });
+
   it('returns null when no due date is set', () => {
     const task = { title: 'Test Task' };
     expect(getTaskDueDate(task)).toBe(null);
