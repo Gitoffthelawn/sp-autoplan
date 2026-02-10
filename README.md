@@ -1,6 +1,7 @@
 # AutoPlan - Automatic Task Scheduler for Super Productivity
 
 Intelligently schedule your tasks based on urgency. Inspired by the proven approach of [taskcheck](https://github.com/00sapo/taskcheck) for taskwarrior.
+You can find a tutorial in [Wiki](https://github.com/00sapo/sp-autoplan/wiki).
 
 ## Installation
 
@@ -17,6 +18,8 @@ Intelligently schedule your tasks based on urgency. Inspired by the proven appro
 
 That's it. I strongly recommend to adjust the settings and save them. Each option in the UI is
 self-explained.
+
+You can also find a tutorial in [Wiki](https://github.com/00sapo/sp-autoplan/wiki).
 
 ## Features
 
