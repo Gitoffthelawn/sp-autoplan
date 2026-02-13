@@ -205,6 +205,35 @@ describe('AutoPlanner.schedule', () => {
     expect(Math.abs(firstBlockMs - (2 * 60 * 60 * 1000))).toBeLessThan(1000);
   });
 
+  it('preserves timeSpent when dynamically shortening first split', () => {
+    const task = createTask({
+      id: 'task-1',
+      title: 'Long Task',
+      timeEstimate: 6 * 60 * 60 * 1000, // 6 hours
+      timeSpent: 2 * 60 * 60 * 1000, // 2 hours
+    });
+
+    const dynamicConfig = {
+      ...config,
+      workdayHours: 1, // Force partial scheduling
+      minimumBlockSizeMinutes: 30,
+    };
+
+    const splits = TaskSplitter.splitTask(task, 180, dynamicConfig); // 3 hour blocks
+    expect(splits).toHaveLength(2);
+
+    const startTime = new Date('2024-01-15T09:00:00');
+    const result = AutoPlanner.schedule(splits, dynamicConfig, allTags, [], startTime);
+
+    expect(result.schedule.length).toBeGreaterThan(0);
+
+    const firstSplit = result.schedule[0].split;
+    const expectedMs = task.timeSpent + 60 * 60 * 1000; // timeSpent + scheduled hour
+
+    expect(firstSplit.timeSpentMs).toBe(task.timeSpent);
+    expect(firstSplit.estimatedMs).toBe(expectedMs);
+  });
+
   it('schedules by priority with tag boosts', () => {
     const tagConfig = {
       ...config,
