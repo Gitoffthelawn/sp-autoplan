@@ -1419,8 +1419,10 @@ const AutoPlanner = {
               );
               
               // Update the current split's estimated time
-              split.estimatedHours = blockMinutes / 60;
-              split.estimatedMs = blockMinutes * 60 * 1000;
+              // Preserve any existing timeSpent on the split (first split only)
+              const splitTimeSpentMs = split.timeSpentMs || 0;
+              split.estimatedHours = (blockMinutes * 60 * 1000 + splitTimeSpentMs) / (60 * 60 * 1000);
+              split.estimatedMs = blockMinutes * 60 * 1000 + splitTimeSpentMs;
               
               // Add new split to remainingSplits for future scheduling
               remainingSplits.push(newSplit);
