@@ -1,7 +1,7 @@
 # AutoPlan - Automatic Task Scheduler for Super Productivity
 
 > [!Warning]
-> Mirrored at https://codeberg.org/00sapo/sp-autoplan
+> Moved to https://codeberg.org/00sapo/sp-autoplan
 
 Intelligently schedule your tasks based on urgency. Inspired by the proven approach of [taskcheck](https://github.com/00sapo/taskcheck) for taskwarrior.
 You can find a tutorial in [Wiki](https://github.com/00sapo/sp-autoplan/wiki).
